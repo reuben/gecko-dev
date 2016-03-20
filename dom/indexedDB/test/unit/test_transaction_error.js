@@ -3,7 +3,7 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-let testGenerator = testSteps();
+var testGenerator = testSteps();
 
 function testSteps() {
   const dbName = this.window ?
@@ -43,7 +43,7 @@ function testSteps() {
 
   info("Adding duplicate entry with preventDefault()");
 
-  let request = objectStore.add(data, dataKey);
+  request = objectStore.add(data, dataKey);
   request.onsuccess = unexpectedSuccessHandler;
   request.onerror = grabEventAndContinueHandler;
   event = yield undefined;
@@ -82,6 +82,18 @@ function testSteps() {
 
   if ("SimpleTest" in this) {
     SimpleTest.expectUncaughtException();
+  } else if ("DedicatedWorkerGlobalScope" in self &&
+             self instanceof DedicatedWorkerGlobalScope) {
+    let oldErrorFunction = self.onerror;
+    self.onerror = function(message, file, line) {
+      self.onerror = oldErrorFunction;
+      oldErrorFunction = null;
+
+      is(message,
+        "ConstraintError",
+        "Got expected ConstraintError on DedicatedWorkerGlobalScope");
+      return true;
+    };
   }
 
   request = objectStore.add(data, dataKey);

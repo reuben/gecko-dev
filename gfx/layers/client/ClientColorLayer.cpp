@@ -18,21 +18,23 @@ namespace layers {
 
 using namespace mozilla::gfx;
 
-class ClientColorLayer : public ColorLayer, 
+class ClientColorLayer : public ColorLayer,
                          public ClientLayer {
 public:
-  ClientColorLayer(ClientLayerManager* aLayerManager) :
-    ColorLayer(aLayerManager,
-               static_cast<ClientLayer*>(MOZ_THIS_IN_INITIALIZER_LIST()))
+  explicit ClientColorLayer(ClientLayerManager* aLayerManager) :
+    ColorLayer(aLayerManager, static_cast<ClientLayer*>(this))
   {
     MOZ_COUNT_CTOR(ClientColorLayer);
   }
+
+protected:
   virtual ~ClientColorLayer()
   {
     MOZ_COUNT_DTOR(ClientColorLayer);
   }
 
-  virtual void SetVisibleRegion(const nsIntRegion& aRegion)
+public:
+  virtual void SetVisibleRegion(const LayerIntRegion& aRegion)
   {
     NS_ASSERTION(ClientManager()->InConstruction(),
                  "Can only set properties in construction phase");
@@ -41,9 +43,7 @@ public:
 
   virtual void RenderLayer()
   {
-    if (GetMaskLayer()) {
-      ToClientLayer(GetMaskLayer())->RenderLayer();
-    }
+    RenderMaskLayers(this);
   }
 
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs)
@@ -70,11 +70,11 @@ already_AddRefed<ColorLayer>
 ClientLayerManager::CreateColorLayer()
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-  nsRefPtr<ClientColorLayer> layer =
+  RefPtr<ClientColorLayer> layer =
     new ClientColorLayer(this);
   CREATE_SHADOW(Color);
   return layer.forget();
 }
 
-}
-}
+} // namespace layers
+} // namespace mozilla

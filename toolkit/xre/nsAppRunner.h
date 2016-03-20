@@ -32,11 +32,7 @@
 // and we load localstore from somewhere else.
 #define NS_LOCALSTORE_UNSAFE_FILE "LStoreS"
 
-class nsACString;
-struct nsStaticModuleInfo;
-
 class nsINativeAppSupport;
-class nsICmdLineService;
 class nsXREDirProvider;
 class nsIToolkitProfileService;
 class nsIFile;
@@ -57,6 +53,8 @@ extern char **gArgv;
 extern int    gRestartArgc;
 extern char **gRestartArgv;
 extern bool gLogConsoleErrors;
+
+extern bool gIsGtest;
 
 /**
  * Create the nativeappsupport implementation.
@@ -95,15 +93,17 @@ NS_LockProfilePath(nsIFile* aPath, nsIFile* aTempPath,
 void
 WriteConsoleLog();
 
+void
+OverrideDefaultLocaleIfNeeded();
+
 #ifdef XP_WIN
+void
+UseParentConsole();
+
 BOOL
 WinLaunchChild(const wchar_t *exePath, int argc,
                char **argv, HANDLE userToken = nullptr,
                HANDLE *hProcess = nullptr);
-BOOL
-WriteStatusPending(LPCWSTR updateDirPath);
-BOOL
-WriteStatusApplied(LPCWSTR updateDirPath);
 #endif
 
 #define NS_NATIVEAPPSUPPORT_CONTRACTID "@mozilla.org/toolkit/native-app-support;1"
@@ -111,13 +111,20 @@ WriteStatusApplied(LPCWSTR updateDirPath);
 namespace mozilla {
 namespace startup {
 extern GeckoProcessType sChildProcessType;
-}
-}
+} // namespace startup
+} // namespace mozilla
 
 /**
  * Set up platform specific error handling such as suppressing DLL load dialog
  * and the JIT debugger on Windows, and install unix signal handlers.
  */
 void SetupErrorHandling(const char* progname);
+
+/**
+ * A numeric value indicating whether multiprocess might be blocked.
+ * Possible values can be found at nsAppRunner.cpp. A value of 0
+ * represents not blocking.
+ */
+uint32_t MultiprocessBlockPolicy();
 
 #endif // nsAppRunner_h__

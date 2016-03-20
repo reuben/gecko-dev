@@ -18,8 +18,12 @@ enum OverSampleType {
 
 interface WaveShaperNode : AudioNode {
 
+      [SetterThrows]
       attribute Float32Array? curve;
       attribute OverSampleType oversample;
 
 };
+
+// Mozilla extension
+WaveShaperNode implements AudioNodePassThrough;
 

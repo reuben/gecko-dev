@@ -28,10 +28,16 @@ WHICH GENERATES THE GLSL ES preprocessor expression parser.
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #endif
 #elif defined(_MSC_VER)
-#pragma warning(disable: 4065 4701)
+#pragma warning(disable: 4065 4244 4701 4702)
 #endif
 
 #include "ExpressionParser.h"
+
+#if defined(_MSC_VER)
+#include <malloc.h>
+#else
+#include <stdlib.h>
+#endif
 
 #include <cassert>
 #include <sstream>
@@ -46,6 +52,7 @@ typedef __int64 YYSTYPE;
 #include <stdint.h>
 typedef intmax_t YYSTYPE;
 #endif  // _MSC_VER
+
 #define YYENABLE_NLS 0
 #define YYLTYPE_IS_TRIVIAL 1
 #define YYSTYPE_IS_TRIVIAL 1
@@ -58,12 +65,23 @@ struct Context
     pp::Lexer* lexer;
     pp::Token* token;
     int* result;
+    bool parsePresetToken;
+
+    pp::ExpressionParser::ErrorSettings errorSettings;
+    bool *valid;
+
+    void startIgnoreErrors() { ++ignoreErrors; }
+    void endIgnoreErrors() { --ignoreErrors; }
+
+    bool isIgnoringErrors() { return ignoreErrors > 0; }
+
+    int ignoreErrors;
 };
 }  // namespace
 %}
 
 %pure-parser
-%name-prefix="pp"
+%name-prefix "pp"
 %parse-param {Context *context}
 %lex-param {Context *context}
 
@@ -73,6 +91,7 @@ static void yyerror(Context* context, const char* reason);
 %}
 
 %token TOK_CONST_INT
+%token TOK_IDENTIFIER
 %left TOK_OP_OR
 %left TOK_OP_AND
 %left '|'
@@ -96,11 +115,58 @@ input
 
 expression
     : TOK_CONST_INT
-    | expression TOK_OP_OR expression {
-        $$ = $1 || $3;
+    | TOK_IDENTIFIER {
+        if (!context->isIgnoringErrors())
+        {
+            // This rule should be applied right after the token is lexed, so we can
+            // refer to context->token in the error message.
+            context->diagnostics->report(context->errorSettings.unexpectedIdentifier,
+                                         context->token->location, context->token->text);
+            *(context->valid) = false;
+        }
+        $$ = $1;
     }
-    | expression TOK_OP_AND expression {
-        $$ = $1 && $3;
+    | expression TOK_OP_OR {
+        if ($1 != 0)
+        {
+            // Ignore errors in the short-circuited part of the expression.
+            // ESSL3.00 section 3.4:
+            // If an operand is not evaluated, the presence of undefined identifiers
+            // in the operand will not cause an error.
+            // Unevaluated division by zero should not cause an error either.
+            context->startIgnoreErrors();
+        }
+    } expression {
+        if ($1 != 0)
+        {
+            context->endIgnoreErrors();
+            $$ = static_cast<YYSTYPE>(1);
+        }
+        else
+        {
+            $$ = $1 || $4;
+        }
+    }
+    | expression TOK_OP_AND {
+        if ($1 == 0)
+        {
+            // Ignore errors in the short-circuited part of the expression.
+            // ESSL3.00 section 3.4:
+            // If an operand is not evaluated, the presence of undefined identifiers
+            // in the operand will not cause an error.
+            // Unevaluated division by zero should not cause an error either.
+            context->startIgnoreErrors();
+        }
+    } expression {
+        if ($1 == 0)
+        {
+            context->endIgnoreErrors();
+            $$ = static_cast<YYSTYPE>(0);
+        }
+        else
+        {
+            $$ = $1 && $4;
+        }
     }
     | expression '|' expression {
         $$ = $1 | $3;
@@ -142,28 +208,42 @@ expression
         $$ = $1 + $3;
     }
     | expression '%' expression {
-        if ($3 == 0) {
-            std::ostringstream stream;
-            stream << $1 << " % " << $3;
-            std::string text = stream.str();
-            context->diagnostics->report(pp::Diagnostics::DIVISION_BY_ZERO,
-                                         context->token->location,
-                                         text.c_str());
-            YYABORT;
-        } else {
+        if ($3 == 0)
+        {
+            if (!context->isIgnoringErrors())
+            {
+                std::ostringstream stream;
+                stream << $1 << " % " << $3;
+                std::string text = stream.str();
+                context->diagnostics->report(pp::Diagnostics::PP_DIVISION_BY_ZERO,
+                                             context->token->location,
+                                             text.c_str());
+                *(context->valid) = false;
+            }
+            $$ = static_cast<YYSTYPE>(0);
+        }
+        else
+        {
             $$ = $1 % $3;
         }
     }
     | expression '/' expression {
-        if ($3 == 0) {
-            std::ostringstream stream;
-            stream << $1 << " / " << $3;
-            std::string text = stream.str();
-            context->diagnostics->report(pp::Diagnostics::DIVISION_BY_ZERO,
-                                         context->token->location,
-                                         text.c_str());
-            YYABORT;
-        } else {
+        if ($3 == 0)
+        {
+            if (!context->isIgnoringErrors())
+            {
+                std::ostringstream stream;
+                stream << $1 << " / " << $3;
+                std::string text = stream.str();
+                context->diagnostics->report(pp::Diagnostics::PP_DIVISION_BY_ZERO,
+                                            context->token->location,
+                                            text.c_str());
+                *(context->valid) = false;
+            }
+            $$ = static_cast<YYSTYPE>(0);
+        }
+        else
+        {
             $$ = $1 / $3;
         }
     }
@@ -189,79 +269,115 @@ expression
 
 %%
 
-int yylex(YYSTYPE* lvalp, Context* context)
+int yylex(YYSTYPE *lvalp, Context *context)
 {
+    pp::Token *token = context->token;
+    if (!context->parsePresetToken)
+    {
+        context->lexer->lex(token);
+    }
+    context->parsePresetToken = false;
+
     int type = 0;
 
-    pp::Token* token = context->token;
     switch (token->type)
     {
-      case pp::Token::CONST_INT:
-      {
+      case pp::Token::CONST_INT: {
         unsigned int val = 0;
-        if (!token->uValue(&val))
+        int testVal = 0;
+        if (!token->uValue(&val) || (!token->iValue(&testVal) &&
+                                     context->errorSettings.integerLiteralsMustFit32BitSignedRange))
         {
-            context->diagnostics->report(pp::Diagnostics::INTEGER_OVERFLOW,
+            context->diagnostics->report(pp::Diagnostics::PP_INTEGER_OVERFLOW,
                                          token->location, token->text);
+            *(context->valid) = false;
         }
         *lvalp = static_cast<YYSTYPE>(val);
         type = TOK_CONST_INT;
         break;
       }
-      case pp::Token::OP_OR: type = TOK_OP_OR; break;
-      case pp::Token::OP_AND: type = TOK_OP_AND; break;
-      case pp::Token::OP_NE: type = TOK_OP_NE; break;
-      case pp::Token::OP_EQ: type = TOK_OP_EQ; break;
-      case pp::Token::OP_GE: type = TOK_OP_GE; break;
-      case pp::Token::OP_LE: type = TOK_OP_LE; break;
-      case pp::Token::OP_RIGHT: type = TOK_OP_RIGHT; break;
-      case pp::Token::OP_LEFT: type = TOK_OP_LEFT; break;
-      case '|': type = '|'; break;
-      case '^': type = '^'; break;
-      case '&': type = '&'; break;
-      case '>': type = '>'; break;
-      case '<': type = '<'; break;
-      case '-': type = '-'; break;
-      case '+': type = '+'; break;
-      case '%': type = '%'; break;
-      case '/': type = '/'; break;
-      case '*': type = '*'; break;
-      case '!': type = '!'; break;
-      case '~': type = '~'; break;
-      case '(': type = '('; break;
-      case ')': type = ')'; break;
+      case pp::Token::IDENTIFIER:
+        *lvalp = static_cast<YYSTYPE>(-1);
+        type = TOK_IDENTIFIER;
+        break;
+      case pp::Token::OP_OR:
+        type = TOK_OP_OR;
+        break;
+      case pp::Token::OP_AND:
+        type = TOK_OP_AND;
+        break;
+      case pp::Token::OP_NE:
+        type = TOK_OP_NE;
+        break;
+      case pp::Token::OP_EQ:
+        type = TOK_OP_EQ;
+        break;
+      case pp::Token::OP_GE:
+        type = TOK_OP_GE;
+        break;
+      case pp::Token::OP_LE:
+        type = TOK_OP_LE;
+        break;
+      case pp::Token::OP_RIGHT:
+        type = TOK_OP_RIGHT;
+        break;
+      case pp::Token::OP_LEFT:
+        type = TOK_OP_LEFT;
+        break;
+      case '|':
+      case '^':
+      case '&':
+      case '>':
+      case '<':
+      case '-':
+      case '+':
+      case '%':
+      case '/':
+      case '*':
+      case '!':
+      case '~':
+      case '(':
+      case ')':
+        type = token->type;
+        break;
 
-      default: break;
+      default:
+        break;
     }
-
-    // Advance to the next token if the current one is valid.
-    if (type != 0) context->lexer->lex(token);
 
     return type;
 }
 
-void yyerror(Context* context, const char* reason)
+void yyerror(Context *context, const char *reason)
 {
-    context->diagnostics->report(pp::Diagnostics::INVALID_EXPRESSION,
+    context->diagnostics->report(pp::Diagnostics::PP_INVALID_EXPRESSION,
                                  context->token->location,
                                  reason);
 }
 
 namespace pp {
 
-ExpressionParser::ExpressionParser(Lexer* lexer, Diagnostics* diagnostics) :
-    mLexer(lexer),
-    mDiagnostics(diagnostics)
+ExpressionParser::ExpressionParser(Lexer *lexer, Diagnostics *diagnostics)
+    : mLexer(lexer),
+      mDiagnostics(diagnostics)
 {
 }
 
-bool ExpressionParser::parse(Token* token, int* result)
+bool ExpressionParser::parse(Token *token,
+                             int *result,
+                             bool parsePresetToken,
+                             const ErrorSettings &errorSettings,
+                             bool *valid)
 {
     Context context;
     context.diagnostics = mDiagnostics;
     context.lexer = mLexer;
     context.token = token;
     context.result = result;
+    context.ignoreErrors = 0;
+    context.parsePresetToken = parsePresetToken;
+    context.errorSettings    = errorSettings;
+    context.valid            = valid;
     int ret = yyparse(&context);
     switch (ret)
     {
@@ -270,12 +386,12 @@ bool ExpressionParser::parse(Token* token, int* result)
         break;
 
       case 2:
-        mDiagnostics->report(Diagnostics::OUT_OF_MEMORY, token->location, "");
+        mDiagnostics->report(Diagnostics::PP_OUT_OF_MEMORY, token->location, "");
         break;
 
       default:
         assert(false);
-        mDiagnostics->report(Diagnostics::INTERNAL_ERROR, token->location, "");
+        mDiagnostics->report(Diagnostics::PP_INTERNAL_ERROR, token->location, "");
         break;
     }
 

@@ -164,21 +164,6 @@ function gc()
   }
 }
 
-function jsdgc()
-{
-  try
-  {
-    var jsdIDebuggerService = SpecialPowers.Ci.jsdIDebuggerService;
-    var service = SpecialPowers.Cc['@mozilla.org/js/jsd/debugger-service;1'].
-      getService(jsdIDebuggerService);
-    service.GC();
-  }
-  catch(ex)
-  {
-    print('jsdgc: ' + ex);
-  }
-}
-
 function quit()
 {
 }
@@ -344,6 +329,14 @@ function jsTestDriverBrowserInit()
       properties.version = '1.8';
     }
     else if (properties.test.match(/^ecma_6\/LexicalEnvironment/))
+    {
+      properties.version = '1.8';
+    }
+    else if (properties.test.match(/^ecma_6\/Class/))
+    {
+      properties.version = '1.8';
+    }
+    else if (properties.test.match(/^ecma_6\/extensions/))
     {
       properties.version = '1.8';
     }
@@ -565,6 +558,16 @@ function closeDialog()
       subject.close();
     }
   }
+}
+
+function newGlobal() {
+  var iframe = document.createElement("iframe");
+  document.documentElement.appendChild(iframe);
+  var win = iframe.contentWindow;
+  iframe.remove();
+  // Shim in "evaluate"
+  win.evaluate = win.eval;
+  return win;
 }
 
 registerDialogCloser();

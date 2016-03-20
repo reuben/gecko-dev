@@ -7,13 +7,18 @@ this.EXPORTED_SYMBOLS = [
   "ClientsRec"
 ];
 
-const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
+Cu.import("resource://services-common/async.js");
 Cu.import("resource://services-common/stringbundle.js");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/engines.js");
 Cu.import("resource://services-sync/record.js");
 Cu.import("resource://services-sync/util.js");
+Cu.import("resource://gre/modules/Services.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "fxAccounts",
+  "resource://gre/modules/FxAccounts.jsm");
 
 const CLIENTS_TTL = 1814400; // 21 days
 const CLIENTS_TTL_REFRESH = 604800; // 7 days
@@ -29,7 +34,11 @@ ClientsRec.prototype = {
   ttl: CLIENTS_TTL
 };
 
-Utils.deferGetSet(ClientsRec, "cleartext", ["name", "type", "commands", "version", "protocols"]);
+Utils.deferGetSet(ClientsRec,
+                  "cleartext",
+                  ["name", "type", "commands",
+                   "version", "protocols",
+                   "formfactor", "os", "appPackage", "application", "device"]);
 
 
 this.ClientEngine = function ClientEngine(service) {
@@ -45,7 +54,9 @@ ClientEngine.prototype = {
   _trackerObj: ClientsTracker,
 
   // Always sync client data as it controls other sync behavior
-  get enabled() true,
+  get enabled() {
+    return true;
+  },
 
   get lastRecordUpload() {
     return Svc.Prefs.get(this.name + ".lastRecordUpload", 0);
@@ -57,13 +68,14 @@ ClientEngine.prototype = {
   // Aggregate some stats on the composition of clients on this account
   get stats() {
     let stats = {
-      hasMobile: this.localType == "mobile",
+      hasMobile: this.localType == DEVICE_TYPE_MOBILE,
       names: [this.localName],
       numClients: 1,
     };
 
-    for each (let {name, type} in this._store._remoteClients) {
-      stats.hasMobile = stats.hasMobile || type == "mobile";
+    for (let id in this._store._remoteClients) {
+      let {name, type} = this._store._remoteClients[id];
+      stats.hasMobile = stats.hasMobile || type == DEVICE_TYPE_MOBILE;
       stats.names.push(name);
       stats.numClients++;
     }
@@ -81,7 +93,8 @@ ClientEngine.prototype = {
 
     counts.set(this.localType, 1);
 
-    for each (let record in this._store._remoteClients) {
+    for (let id in this._store._remoteClients) {
+      let record = this._store._remoteClients[id];
       let type = record.type;
       if (!counts.has(type)) {
         counts.set(type, 0);
@@ -98,46 +111,33 @@ ClientEngine.prototype = {
     let localID = Svc.Prefs.get("client.GUID", "");
     return localID == "" ? this.localID = Utils.makeGUID() : localID;
   },
-  set localID(value) Svc.Prefs.set("client.GUID", value),
+  set localID(value) {
+    Svc.Prefs.set("client.GUID", value);
+  },
+
+  get brandName() {
+    let brand = new StringBundle("chrome://branding/locale/brand.properties");
+    return brand.get("brandShortName");
+  },
 
   get localName() {
-    let localName = Svc.Prefs.get("client.name", "");
-    if (localName != "")
-      return localName;
-
-    // Generate a client name if we don't have a useful one yet
-    let env = Cc["@mozilla.org/process/environment;1"]
-                .getService(Ci.nsIEnvironment);
-    let user = env.get("USER") || env.get("USERNAME") ||
-               Svc.Prefs.get("account") || Svc.Prefs.get("username");
-
-    let appName;
-    let brand = new StringBundle("chrome://branding/locale/brand.properties");
-    let brandName = brand.get("brandShortName");
-    try {
-      let syncStrings = new StringBundle("chrome://browser/locale/sync.properties");
-      appName = syncStrings.getFormattedString("sync.defaultAccountApplication", [brandName]);
-    } catch (ex) {}
-    appName = appName || brandName;
-
-    let system =
-      // 'device' is defined on unix systems
-      Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2).get("device") ||
-      // hostname of the system, usually assigned by the user or admin
-      Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2).get("host") ||
-      // fall back on ua info string
-      Cc["@mozilla.org/network/protocol;1?name=http"].getService(Ci.nsIHttpProtocolHandler).oscpu;
-
-    return this.localName = Str.sync.get("client.name2", [user, appName, system]);
+    return this.localName = Utils.getDeviceName();
   },
-  set localName(value) Svc.Prefs.set("client.name", value),
+  set localName(value) {
+    Svc.Prefs.set("client.name", value);
+    fxAccounts.updateDeviceRegistration();
+  },
 
-  get localType() Svc.Prefs.get("client.type", "desktop"),
-  set localType(value) Svc.Prefs.set("client.type", value),
+  get localType() {
+    return Utils.getDeviceType();
+  },
+  set localType(value) {
+    Svc.Prefs.set("client.type", value);
+  },
 
   isMobile: function isMobile(id) {
     if (this._store._remoteClients[id])
-      return this._store._remoteClients[id].type == "mobile";
+      return this._store._remoteClients[id].type == DEVICE_TYPE_MOBILE;
     return false;
   },
 
@@ -150,13 +150,35 @@ ClientEngine.prototype = {
     SyncEngine.prototype._syncStartup.call(this);
   },
 
+  _syncFinish() {
+    // Record telemetry for our device types.
+    for (let [deviceType, count] of this.deviceTypes) {
+      let hid;
+      switch (deviceType) {
+        case "desktop":
+          hid = "WEAVE_DEVICE_COUNT_DESKTOP";
+          break;
+        case "mobile":
+          hid = "WEAVE_DEVICE_COUNT_MOBILE";
+          break;
+        default:
+          this._log.warn(`Unexpected deviceType "${deviceType}" recording device telemetry.`);
+          continue;
+      }
+      Services.telemetry.getHistogramById(hid).add(count);
+    }
+    SyncEngine.prototype._syncFinish.call(this);
+  },
+
   // Always process incoming items because they might have commands
   _reconcile: function _reconcile() {
     return true;
   },
 
   // Treat reset the same as wiping for locally cached clients
-  _resetClient: function _resetClient() this._wipeClient(),
+  _resetClient() {
+    this._wipeClient();
+  },
 
   _wipeClient: function _wipeClient() {
     SyncEngine.prototype._resetClient.call(this);
@@ -260,7 +282,11 @@ ClientEngine.prototype = {
       this.clearCommands();
 
       // Process each command in order.
-      for each ({command: command, args: args} in commands) {
+      if (!commands) {
+        return true;
+      }
+      for (let key in commands) {
+        let {command, args} = commands[key];
         this._log.debug("Processing command: " + command + "(" + args + ")");
 
         let engines = [args[0]];
@@ -392,7 +418,9 @@ function ClientStore(name, engine) {
 ClientStore.prototype = {
   __proto__: Store.prototype,
 
-  create: function create(record) this.update(record),
+  create(record) {
+    this.update(record)
+  },
 
   update: function update(record) {
     // Only grab commands from the server; local name/type always wins
@@ -407,19 +435,37 @@ ClientStore.prototype = {
 
     // Package the individual components into a record for the local client
     if (id == this.engine.localID) {
+      let cb = Async.makeSpinningCallback();
+      fxAccounts.getDeviceId().then(id => cb(null, id), cb);
+      try {
+        record.fxaDeviceId = cb.wait();
+      } catch(error) {
+        this._log.warn("failed to get fxa device id", error);
+      }
       record.name = this.engine.localName;
       record.type = this.engine.localType;
       record.commands = this.engine.localCommands;
       record.version = Services.appinfo.version;
       record.protocols = SUPPORTED_PROTOCOL_VERSIONS;
-    }
-    else
+
+      // Optional fields.
+      record.os = Services.appinfo.OS;             // "Darwin"
+      record.appPackage = Services.appinfo.ID;
+      record.application = this.engine.brandName   // "Nightly"
+
+      // We can't compute these yet.
+      // record.device = "";            // Bug 1100723
+      // record.formfactor = "";        // Bug 1100722
+    } else {
       record.cleartext = this._remoteClients[id];
+    }
 
     return record;
   },
 
-  itemExists: function itemExists(id) id in this.getAllIDs(),
+  itemExists(id) {
+    return id in this.getAllIDs();
+  },
 
   getAllIDs: function getAllIDs() {
     let ids = {};

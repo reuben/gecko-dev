@@ -6,7 +6,7 @@
 
 [OverrideBuiltins]
 interface HTMLDocument : Document {
-           [Throws]
+           [SetterThrows]
            attribute DOMString? domain;
            [Throws]
            attribute DOMString cookie;
@@ -36,7 +36,7 @@ interface HTMLDocument : Document {
   [Throws]
   Document open(optional DOMString type = "text/html", optional DOMString replace = "");
   [Throws]
-  WindowProxy open(DOMString url, DOMString name, DOMString features, optional boolean replace = false);
+  WindowProxy? open(DOMString url, DOMString name, DOMString features, optional boolean replace = false);
   [Throws]
   void close();
   [Throws]
@@ -83,4 +83,20 @@ interface HTMLDocument : Document {
   // XXXbz do we actually need these anymore?
   void                      captureEvents();
   void                      releaseEvents();
+};
+
+partial interface HTMLDocument {
+  /*
+   * Number of nodes that have been blocked by
+   * the Safebrowsing API to prevent tracking.
+   */
+  [ChromeOnly, Pure]
+  readonly attribute long blockedTrackingNodeCount;
+
+  /*
+   * List of nodes that have been blocked by
+   * the Safebrowsing API to prevent tracking.
+   */
+  [ChromeOnly, Pure]
+  readonly attribute NodeList blockedTrackingNodes;
 };

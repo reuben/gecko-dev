@@ -17,15 +17,17 @@ class nsScreenManagerCocoa : public nsIScreenManager
 {
 public:
     nsScreenManagerCocoa();
-    virtual ~nsScreenManagerCocoa();
 
     NS_DECL_ISUPPORTS
     NS_DECL_NSISCREENMANAGER
 
+protected:
+    virtual ~nsScreenManagerCocoa();
+
 private:
 
     nsScreenCocoa *ScreenForCocoaScreen(NSScreen *screen);
-    nsTArray< nsRefPtr<nsScreenCocoa> > mScreenList;
+    nsTArray< RefPtr<nsScreenCocoa> > mScreenList;
 };
 
 #endif // nsScreenManagerCocoa_h_

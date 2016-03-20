@@ -6,10 +6,12 @@ MARIONETTE_TIMEOUT = 10000;
 SpecialPowers.addPermission("fmradio", true, document);
 SpecialPowers.addPermission("settings-read", true, document);
 SpecialPowers.addPermission("settings-write", true, document);
+SpecialPowers.addPermission("settings-api-read", true, document);
+SpecialPowers.addPermission("settings-api-write", true, document);
 
-let FMRadio = window.navigator.mozFMRadio;
-let mozSettings = window.navigator.mozSettings;
-let KEY = "airplaneMode.enabled";
+var FMRadio = window.navigator.mozFMRadio;
+var mozSettings = window.navigator.mozSettings;
+var KEY = "airplaneMode.enabled";
 
 function verifyInitialState() {
   log("Verifying initial state.");

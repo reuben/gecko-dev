@@ -13,7 +13,7 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Messaging.jsm");
 
-let Scope = Object.freeze({
+var Scope = Object.freeze({
   APP:          "app",
   PROFILE:      "profile",
   GLOBAL:       "global"
@@ -22,7 +22,7 @@ let Scope = Object.freeze({
 /**
  * Public API to getting a SharedPreferencesImpl instance. These scopes mirror GeckoSharedPrefs.
  */
-let SharedPreferences = {
+var SharedPreferences = {
   forApp: function() {
     return new SharedPreferencesImpl({ scope: Scope.APP });
   },
@@ -61,7 +61,7 @@ let SharedPreferences = {
  */
 function SharedPreferencesImpl(options = {}) {
   if (!(this instanceof SharedPreferencesImpl)) {
-    return new SharedPreferencesImpl(level);
+    return new SharedPreferencesImpl(options);
   }
 
   if (options.scope == null || options.scope == undefined) {
@@ -76,7 +76,7 @@ function SharedPreferencesImpl(options = {}) {
 
 SharedPreferencesImpl.prototype = Object.freeze({
   _set: function _set(prefs) {
-    sendMessageToJava({
+    Messaging.sendRequest({
       type: "SharedPreferences:Set",
       preferences: prefs,
       scope: this._scope,
@@ -109,13 +109,13 @@ SharedPreferencesImpl.prototype = Object.freeze({
 
   _get: function _get(prefs, callback) {
     let result = null;
-    sendMessageToJava({
+    Messaging.sendRequestForResult({
       type: "SharedPreferences:Get",
       preferences: prefs,
       scope: this._scope,
       profileName: this._profileName,
       branch: this._branch,
-    }, (data) => {
+    }).then((data) => {
       result = data.values;
     });
 
@@ -206,7 +206,7 @@ SharedPreferencesImpl.prototype = Object.freeze({
     this._listening = true;
 
     Services.obs.addObserver(this, "SharedPreferences:Changed", false);
-    sendMessageToJava({
+    Messaging.sendRequest({
       type: "SharedPreferences:Observe",
       enable: true,
       scope: this._scope,
@@ -243,7 +243,7 @@ SharedPreferencesImpl.prototype = Object.freeze({
     this._listening = false;
 
     Services.obs.removeObserver(this, "SharedPreferences:Changed");
-    sendMessageToJava({
+    Messaging.sendRequest({
       type: "SharedPreferences:Observe",
       enable: false,
       scope: this._scope,

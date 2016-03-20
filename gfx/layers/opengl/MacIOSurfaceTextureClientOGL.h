@@ -13,35 +13,39 @@ class MacIOSurface;
 namespace mozilla {
 namespace layers {
 
-class MacIOSurfaceTextureClientOGL : public TextureClient
+class MacIOSurfaceTextureData : public TextureData
 {
 public:
-  MacIOSurfaceTextureClientOGL(TextureFlags aFlags);
+  static MacIOSurfaceTextureData* Create(MacIOSurface* aSurface);
 
-  virtual ~MacIOSurfaceTextureClientOGL();
+  ~MacIOSurfaceTextureData();
 
-  void InitWith(MacIOSurface* aSurface);
+  virtual gfx::IntSize GetSize() const override;
 
-  virtual bool Lock(OpenMode aMode) MOZ_OVERRIDE;
+  virtual gfx::SurfaceFormat GetFormat() const override;
 
-  virtual void Unlock() MOZ_OVERRIDE;
+  virtual bool Lock(OpenMode, FenceHandle*) override { return true; }
 
-  virtual bool IsLocked() const MOZ_OVERRIDE;
+  virtual void Unlock() override {}
 
-  virtual bool IsAllocated() const MOZ_OVERRIDE { return !!mSurface; }
+  virtual bool Serialize(SurfaceDescriptor& aOutDescriptor) override;
 
-  virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) MOZ_OVERRIDE;
+  virtual bool HasIntermediateBuffer() const override { return false; }
 
-  virtual gfx::IntSize GetSize() const;
+  virtual void Deallocate(ISurfaceAllocator* aAllocator) override { mSurface = nullptr; }
 
-  virtual bool HasInternalBuffer() const MOZ_OVERRIDE { return false; }
+  virtual void Forget(ISurfaceAllocator* aAllocator) override { mSurface = nullptr; }
+
+  // For debugging purposes only.
+  already_AddRefed<gfx::DataSourceSurface> GetAsSurface();
 
 protected:
+  explicit MacIOSurfaceTextureData(MacIOSurface* aSurface);
+
   RefPtr<MacIOSurface> mSurface;
-  bool mIsLocked;
 };
 
-}
-}
+} // namespace layers
+} // namespace mozilla
 
 #endif // MOZILLA_GFX_MACIOSURFACETEXTURECLIENTOGL_H

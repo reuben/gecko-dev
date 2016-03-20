@@ -9,7 +9,6 @@
 #include "mozilla/Attributes.h"
 
 // Interfaces
-#include "nsIDOMWindow.h"
 #include "nsDeviceContext.h"
 #include "nsIPrintProgressParams.h"
 #include "nsIPrintOptions.h"
@@ -41,7 +40,7 @@ public:
 
   typedef enum {eIsPrinting, eIsPrintPreview } ePrintDataType;
 
-  nsPrintData(ePrintDataType aType);
+  explicit nsPrintData(ePrintDataType aType);
   ~nsPrintData(); // non-virtual
 
   // Listener Helper Methods
@@ -54,7 +53,7 @@ public:
 
 
   ePrintDataType               mType;            // the type of data this is (Printing or Print Preview)
-  nsRefPtr<nsDeviceContext>   mPrintDC;
+  RefPtr<nsDeviceContext>   mPrintDC;
   FILE                        *mDebugFilePtr;    // a file where information can go to when printing
 
   nsPrintObject *                mPrintObject;
@@ -63,7 +62,7 @@ public:
   nsCOMArray<nsIWebProgressListener> mPrintProgressListeners;
   nsCOMPtr<nsIPrintProgressParams> mPrintProgressParams;
 
-  nsCOMPtr<nsIDOMWindow> mCurrentFocusWin; // cache a pointer to the currently focused window
+  nsCOMPtr<nsPIDOMWindowOuter> mCurrentFocusWin; // cache a pointer to the currently focused window
 
   nsTArray<nsPrintObject*>    mPrintDocList;
   bool                        mIsIFrameSelected;
@@ -85,8 +84,8 @@ public:
   char16_t*            mBrandName; //  needed as a substitute name for a document
 
 private:
-  nsPrintData() MOZ_DELETE;
-  nsPrintData& operator=(const nsPrintData& aOther) MOZ_DELETE;
+  nsPrintData() = delete;
+  nsPrintData& operator=(const nsPrintData& aOther) = delete;
 
 };
 

@@ -8,7 +8,7 @@ assertEq(desc.configurable, true);
 assertEq(desc.enumerable, false);
 assertEq(desc.writable, true);
 assertEq(typeof Symbol, "function");
-assertEq(Symbol.length, 1);
+assertEq(Symbol.length, 0);
 
 desc = Object.getOwnPropertyDescriptor(Symbol, "prototype");
 assertEq(desc.configurable, false);
@@ -20,6 +20,11 @@ desc = Object.getOwnPropertyDescriptor(Symbol.prototype, "constructor");
 assertEq(desc.configurable, true);
 assertEq(desc.enumerable, false);
 assertEq(desc.writable, true);
+
+desc = Object.getOwnPropertyDescriptor(Symbol, "iterator");
+assertEq(desc.configurable, false);
+assertEq(desc.enumerable, false);
+assertEq(desc.writable, false);
 
 assertEq(Symbol.for.length, 1);
 assertEq(Symbol.prototype.toString.length, 0);

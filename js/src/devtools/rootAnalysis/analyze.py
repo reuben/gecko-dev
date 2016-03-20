@@ -18,7 +18,7 @@ import re
 
 def env(config):
     e = dict(os.environ)
-    e['PATH'] = '%s:%s' % (e['PATH'], config['sixgill_bin'])
+    e['PATH'] = ':'.join(p for p in (config.get('gcc_bin'), config.get('sixgill_bin'), e['PATH']) if p)
     e['XDB'] = '%(sixgill_bin)s/xdb.so' % config
     e['SOURCE'] = config['source']
     e['ANALYZED_OBJDIR'] = config['objdir']
@@ -65,7 +65,7 @@ def print_command(command, outfile=None, env=None):
 
 def generate_hazards(config, outfilename):
     jobs = []
-    for i in range(config['jobs']):
+    for i in range(int(config['jobs'])):
         command = fill(('%(js)s',
                         '%(analysis_scriptdir)s/analyzeRoots.js',
                         '%(gcFunctions_list)s',
@@ -90,7 +90,7 @@ def generate_hazards(config, outfilename):
         raise subprocess.CalledProcessError(final_status, 'analyzeRoots.js')
 
     with open(outfilename, 'w') as output:
-        command = ['cat'] + [ 'rootingHazards.%s' % (i+1,) for i in range(config['jobs']) ]
+        command = ['cat'] + [ 'rootingHazards.%s' % (i+1,) for i in range(int(config['jobs'])) ]
         print_command(command, outfile=outfilename)
         subprocess.call(command, stdout=output)
 
@@ -104,6 +104,10 @@ JOBS = { 'dbs':
                '-b', '%(sixgill_bin)s',
                '--buildcommand=%(buildcommand)s',
                '.'),
+              ()),
+
+         'list-dbs':
+             (('ls', '-l'),
               ()),
 
          'callgraph':
@@ -127,7 +131,8 @@ JOBS = { 'dbs':
              (generate_hazards, 'rootingHazards.txt'),
 
          'explain':
-             (('python', '%(analysis_scriptdir)s/explain.py',
+             ((os.environ.get('PYTHON', 'python2.7'),
+               '%(analysis_scriptdir)s/explain.py',
                '%(hazards)s', '%(gcFunctions)s',
                '[explained_hazards]', '[unnecessary]', '[refs]'),
               ('hazards.txt', 'unnecessary.txt', 'refs.txt'))
@@ -199,6 +204,10 @@ parser.add_argument('step', metavar='STEP', type=str, nargs='?',
                     help='run starting from this step')
 parser.add_argument('--source', metavar='SOURCE', type=str, nargs='?',
                     help='source code to analyze')
+parser.add_argument('--objdir', metavar='DIR', type=str, nargs='?',
+                    help='object directory of compiled files')
+parser.add_argument('--js', metavar='JSSHELL', type=str, nargs='?',
+                    help='full path to ctypes-capable JS shell')
 parser.add_argument('--upto', metavar='UPTO', type=str, nargs='?',
                     help='last step to execute')
 parser.add_argument('--jobs', '-j', default=None, metavar='JOBS', type=int,

@@ -32,7 +32,7 @@ nsBoxLayout* nsSprocketLayout::gInstance = nullptr;
 
 
 nsresult
-NS_NewSprocketLayout( nsIPresShell* aPresShell, nsCOMPtr<nsBoxLayout>& aNewLayout)
+NS_NewSprocketLayout(nsCOMPtr<nsBoxLayout>& aNewLayout)
 {
   if (!nsSprocketLayout::gInstance) {
     nsSprocketLayout::gInstance = new nsSprocketLayout();
@@ -293,9 +293,6 @@ nsSprocketLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
     origX = x;
     origY = y;
 
-    nscoord nextX = x;
-    nscoord nextY = y;
-
     // Now we iterate over our box children and our box size lists in 
     // parallel.  For each child, we look at its sizes and figure out
     // where to place it.
@@ -354,9 +351,6 @@ nsSprocketLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
           y -= (childBoxSize->right);
       }
 
-      nextX = x;
-      nextY = y;
-
       // Now we build a child rect.
       nscoord rectX = x;
       nscoord rectY = y;
@@ -383,6 +377,9 @@ nsSprocketLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
     
       // Either |nextX| or |nextY| is updated by this function call, according
       // to our axis.
+      nscoord nextX = x;
+      nscoord nextY = y;
+
       ComputeChildsNextPosition(aBox, x, y, nextX, nextY, childRect);
 
       // Now we further update our nextX/Y along our axis.
@@ -400,7 +397,12 @@ nsSprocketLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
           nextY += (childBoxSize->right);
         else 
           nextY -= (childBoxSize->left);
-        childRect.x = originalClientRect.x;
+        if (GetFrameDirection(aBox) == NS_STYLE_DIRECTION_LTR) {
+          childRect.x = originalClientRect.x;
+        } else {
+          // keep the right edge of the box the same
+          childRect.x = clientRect.x + originalClientRect.width - childRect.width;
+        }
       }
       
       // If we encounter a completely bogus box size, we just leave this child completely
@@ -530,6 +532,13 @@ nsSprocketLayout::Layout(nsIFrame* aBox, nsBoxLayoutState& aState)
             newChildRect.x = childRect.XMost() - newChildRect.width;
           else
             newChildRect.y = childRect.YMost() - newChildRect.height;
+        }
+
+        if (!(frameState & NS_STATE_IS_HORIZONTAL)) {
+          if (GetFrameDirection(aBox) != NS_STYLE_DIRECTION_LTR) {
+            // keep the right edge the same
+            newChildRect.x = childRect.XMost() - newChildRect.width;
+          }
         }
 
         // If the child resized then recompute its position.
@@ -693,7 +702,7 @@ nsSprocketLayout::PopulateBoxSizes(nsIFrame* aBox, nsBoxLayoutState& aState, nsB
       }
     
 
-      flex = child->GetFlex(aState);
+      flex = child->GetFlex();
 
       currentBox->flex = flex;
       currentBox->collapsed = child->IsCollapsed();
@@ -777,7 +786,7 @@ nsSprocketLayout::PopulateBoxSizes(nsIFrame* aBox, nsBoxLayoutState& aState, nsB
           prefWidth = pref.height;
       }
 
-      nscoord flex = child->GetFlex(aState);
+      nscoord flex = child->GetFlex();
 
       // set them if you collapsed you are not flexible.
       if (collapsed) {
@@ -1378,7 +1387,7 @@ nsSprocketLayout::GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
         
         // if the child is not flexible then
         // its min size is its pref size.
-        if (child->GetFlex(aState) == 0) {
+        if (child->GetFlex() == 0) {
             pref = child->GetPrefSize(aState);
             if (isHorizontal)
                min.width = pref.width;

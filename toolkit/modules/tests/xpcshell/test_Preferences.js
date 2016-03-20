@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu, manager: Cm} = Components;
+var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu, manager: Cm} = Components;
 
 Cu.import("resource://gre/modules/Preferences.jsm");
 
@@ -131,6 +131,24 @@ add_test(function test_get_string_pref() {
 
   // Clean up.
   Preferences.reset("test_get_string_pref");
+
+  run_next_test();
+});
+
+add_test(function test_get_localized_string_pref() {
+  let svc = Cc["@mozilla.org/preferences-service;1"].
+            getService(Ci.nsIPrefService).
+            getBranch("");
+  let prefName = "test_get_localized_string_pref";
+  let localizedString = Cc["@mozilla.org/pref-localizedstring;1"]
+    .createInstance(Ci.nsIPrefLocalizedString);
+  localizedString.data = "a localized string";
+  svc.setComplexValue(prefName, Ci.nsIPrefLocalizedString, localizedString);
+  do_check_eq(Preferences.get(prefName, null, Ci.nsIPrefLocalizedString),
+    "a localized string");
+
+  // Clean up.
+  Preferences.reset(prefName);
 
   run_next_test();
 });

@@ -13,7 +13,7 @@ var SelectHelper = {
   handleClick: function(aTarget) {
     // if we're busy looking at a select we want to eat any clicks that
     // come to us, but not to process them
-    if (this._uiBusy || !this._isMenu(aTarget) || aTarget.disabled)
+    if (this._uiBusy || !this._isMenu(aTarget) || this._isDisabledElement(aTarget))
         return;
 
     this._uiBusy = true;
@@ -55,13 +55,20 @@ var SelectHelper = {
             changed = true;
             aNode.selected = true;
           }
-          i++;
+          if (SelectHelper._isListItemVisible(aNode)) {
+            i++;
+          }
         });
 
         if (changed)
           this.fireOnChange(aElement);
       }
     }).bind(this));
+  },
+
+
+  _isListItemVisible: function(aNode){
+    return (aNode.style.display !== "none");
   },
 
   _isMenu: function(aElement) {
@@ -73,20 +80,22 @@ var SelectHelper = {
     let index = 0;
     let items = [];
     this.forOptions(aElement, function(aNode, aOptions, aParent) {
-      let item = {
-        label: aNode.text || aNode.label,
-        header: aOptions.isGroup,
-        disabled: aNode.disabled,
-        id: index,
-        selected: aNode.selected
-      }
+      if (SelectHelper._isListItemVisible(aNode)) {
+        let item = {
+          label: aNode.text || aNode.label,
+          header: aOptions.isGroup,
+          disabled: aNode.disabled,
+          id: index,
+          selected: aNode.selected,
+          visible: (aNode.style.display!=="none")
+        };
 
-      if (aParent) {
-        item.child = true;
-        item.disabled = item.disabled || aParent.disabled;
+        if (aParent) {
+          item.child = true;
+          item.disabled = item.disabled || aParent.disabled;
+        }
+        items.push(item);
       }
-      items.push(item);
-
       index++;
     });
     return items;
@@ -134,5 +143,16 @@ var SelectHelper = {
     setTimeout(function() {
       aElement.dispatchEvent(evt);
     }, 0);
+  },
+
+  _isDisabledElement : function(aElement) {
+    let currentElement = aElement;
+    while (currentElement) {
+      if (currentElement.disabled)
+	return true;
+
+      currentElement = currentElement.parentElement;
+    }
+    return false;
   }
 };

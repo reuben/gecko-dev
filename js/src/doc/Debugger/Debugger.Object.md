@@ -153,6 +153,27 @@ from its prototype:
     environment enclosing the function when it was created. If the referent
     is a function proxy or not debuggee code, this is `undefined`.
 
+`isBoundFunction`
+:   `true` if the referent is a bound function; `false` otherwise.
+
+`isArrowFunction`
+:   `true` if the referent is an arrow function; `false` otherwise.
+
+`boundTargetFunction`
+:   If the referent is a bound function, this is its target function—the
+    function that was bound to a particular `this` object. If the referent
+    is not a bound function, this is `undefined`.
+
+`boundThis`
+:   If the referent is a bound function, this is the `this` value it was
+    bound to. If the referent is not a bound function, this is `undefined`.
+
+`boundArguments`
+:   If the referent is a bound function, this is an array (in the Debugger
+    object's compartment) that contains the debuggee values of the `arguments`
+    object it was bound to. If the referent is not a bound function, this is
+    `undefined`.
+
 `proxyHandler`
 :   If the referent is a proxy whose handler object was allocated by
     debuggee code, this is its handler object—the object whose methods are
@@ -181,6 +202,11 @@ from its prototype:
     wrapper's global, not the wrapped object's global. The result refers to
     the global directly, not via a wrapper.
 
+<code id="allocationsite">allocationSite</code>
+:   If [object allocation site tracking][tracking-allocs] was enabled when this
+    `Debugger.Object`'s referent was allocated, return the
+    [JavaScript execution stack][saved-frame] captured at the time of the
+    allocation. Otherwise, return `null`.
 
 
 ## Function Properties of the Debugger.Object prototype
@@ -219,6 +245,12 @@ code), the call throws a [`Debugger.DebuggeeWouldRun`][wouldrun] exception.
 `getOwnPropertyNames()`
 :   Return an array of strings naming all the referent's own properties, as
     if <code>Object.getOwnPropertyNames(<i>referent</i>)</code> had been
+    called in the debuggee, and the result copied in the scope of the
+    debugger's global object.
+
+`getOwnPropertySymbols()`
+:   Return an array of strings naming all the referent's own symbols, as
+    if <code>Object.getOwnPropertySymbols(<i>referent</i>)</code> had been
     called in the debuggee, and the result copied in the scope of the
     debugger's global object.
 
@@ -350,7 +382,7 @@ code), the call throws a [`Debugger.DebuggeeWouldRun`][wouldrun] exception.
     the referent is not callable, throw a `TypeError`. This function
     follows the [invocation function conventions][inv fr].
 
-<code>evalInGlobal(<i>code</i>, [<i>options</i>])</code>
+<code>executeInGlobal(<i>code</i>, [<i>options</i>])</code>
 :   If the referent is a global object, evaluate <i>code</i> in that global
     environment, and return a [completion value][cv] describing how it completed.
     <i>Code</i> is a string. All extant handler methods, breakpoints,
@@ -361,15 +393,15 @@ code), the call throws a [`Debugger.DebuggeeWouldRun`][wouldrun] exception.
     <i>Code</i> is interpreted as strict mode code when it contains a Use
     Strict Directive.
 
-    If <i>code</i> is not strict mode code, then variable declarations in
-    <i>code</i> affect the referent global object. (In the terms used by the
-    ECMAScript specification, the `VariableEnvironment` of the execution
-    context for the eval code is the referent.)
+    This evaluation is semantically equivalent to executing statements at the
+    global level, not an indirect eval. Regardless of <i>code</i> being strict
+    mode code, variable declarations in <i>code</i> affect the referent global
+    object.
 
     The <i>options</i> argument is as for [`Debugger.Frame.prototype.eval`][fr eval].
 
-<code>evalInGlobalWithBindings(<i>code</i>, <i>bindings</i>, [<i>options</i>])</code>
-:   Like `evalInGlobal`, but evaluate <i>code</i> using the referent as the
+<code>executeInGlobalWithBindings(<i>code</i>, <i>bindings</i>, [<i>options</i>])</code>
+:   Like `executeInGlobal`, but evaluate <i>code</i> using the referent as the
     variable object, but with a lexical environment extended with bindings
     from the object <i>bindings</i>. For each own enumerable property of
     <i>bindings</i> named <i>name</i> whose value is <i>value</i>, include a
@@ -384,22 +416,20 @@ code), the call throws a [`Debugger.DebuggeeWouldRun`][wouldrun] exception.
     debuggee values, and do so without mutating any existing debuggee
     environment.
 
-    Note that, like `evalInGlobal`, if the code passed to
-    `evalInGlobalWithBindings` is not strict mode code, then any
-    declarations it contains affect the referent global object, even as
-    <i>code</i> is evaluated in an environment extended according to
-    <i>bindings</i>. (In the terms used by the ECMAScript specification, the
-    `VariableEnvironment` of the execution context for non-strict eval code
-    is the referent, and the <i>bindings</i> appear in a new declarative
-    environment, which is the eval code's `LexicalEnvironment`.)
+    Note that, like `executeInGlobal`, any declarations it contains affect the
+    referent global object, even as <i>code</i> is evaluated in an environment
+    extended according to <i>bindings</i>. (In the terms used by the ECMAScript
+    specification, the `VariableEnvironment` of the execution context for
+    <i>code</i> is the referent, and the <i>bindings</i> appear in a new
+    declarative environment, which is the eval code's `LexicalEnvironment`.)
 
     The <i>options</i> argument is as for [`Debugger.Frame.prototype.eval`][fr eval].
 
 `asEnvironment()`
 :   If the referent is a global object, return the [`Debugger.Environment`][environment]
-    instance representing the referent as a variable environment for
-    evaluating code. If the referent is not a global object, throw a
-    `TypeError`.
+    instance representing the referent's global lexical scope. The global
+    lexical scope's enclosing scope is the global object. If the referent is
+    not a global object, throw a `TypeError`.
 
 <code>setObjectWatchpoint(<i>handler</i>)</code> <i>(future plan)</i>
 :   Set a watchpoint on all the referent's own properties, reporting events
@@ -514,3 +544,13 @@ code), the call throws a [`Debugger.DebuggeeWouldRun`][wouldrun] exception.
     Debugger API: adapted portions of the code can use `Debugger.Object`
     instances, but use this method to pass direct object references to code
     that has not yet been updated.
+
+<code>forceLexicalInitializationByName(<i>binding</i>)</code>
+:  If <i>binding</i> is in an uninitialized state initialize it to undefined
+   and return true, otherwise do nothing and return false.
+
+<code>getErrorMessageName(<i>errorObject</i>)</code>
+:  If <i>errorObject</i> was created with an engine internal message template
+   the name of the template is returned as a string. Because they are stable
+   and unique these message names may be used to identify particular kinds of
+   engine produced errors.

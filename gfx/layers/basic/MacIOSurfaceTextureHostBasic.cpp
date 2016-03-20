@@ -4,8 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MacIOSurfaceTextureHostBasic.h"
-#include "mozilla/layers/BasicCompositor.h"
 #include "mozilla/gfx/MacIOSurface.h"
+#include "MacIOSurfaceHelpers.h"
 
 namespace mozilla {
 namespace layers {
@@ -15,10 +15,13 @@ MacIOSurfaceTextureSourceBasic::MacIOSurfaceTextureSourceBasic(
                                 MacIOSurface* aSurface)
   : mCompositor(aCompositor)
   , mSurface(aSurface)
-{}
+{
+  MOZ_COUNT_CTOR(MacIOSurfaceTextureSourceBasic);
+}
 
 MacIOSurfaceTextureSourceBasic::~MacIOSurfaceTextureSourceBasic()
 {
+  MOZ_COUNT_DTOR(MacIOSurfaceTextureSourceBasic);
 }
 
 gfx::IntSize
@@ -31,7 +34,9 @@ MacIOSurfaceTextureSourceBasic::GetSize() const
 gfx::SurfaceFormat
 MacIOSurfaceTextureSourceBasic::GetFormat() const
 {
-  return mSurface->HasAlpha() ? gfx::SurfaceFormat::R8G8B8A8 : gfx::SurfaceFormat::B8G8R8X8;
+  // Set the format the same way as CreateSourceSurfaceFromMacIOSurface.
+  return mSurface->GetFormat() == gfx::SurfaceFormat::NV12
+    ? gfx::SurfaceFormat::B8G8R8X8 : gfx::SurfaceFormat::B8G8R8A8;
 }
 
 MacIOSurfaceTextureHostBasic::MacIOSurfaceTextureHostBasic(
@@ -40,16 +45,16 @@ MacIOSurfaceTextureHostBasic::MacIOSurfaceTextureHostBasic(
 )
   : TextureHost(aFlags)
 {
-  mSurface = MacIOSurface::LookupSurface(aDescriptor.surface(),
+  mSurface = MacIOSurface::LookupSurface(aDescriptor.surfaceId(),
                                          aDescriptor.scaleFactor(),
-                                         aDescriptor.hasAlpha());
+                                         !aDescriptor.isOpaque());
 }
 
 gfx::SourceSurface*
 MacIOSurfaceTextureSourceBasic::GetSurface(gfx::DrawTarget* aTarget)
 {
   if (!mSourceSurface) {
-    mSourceSurface = mSurface->GetAsSurface();
+    mSourceSurface = CreateSourceSurfaceFromMacIOSurface(mSurface);
   }
   return mSourceSurface;
 }
@@ -94,5 +99,5 @@ MacIOSurfaceTextureHostBasic::GetSize() const {
                       mSurface->GetDevicePixelHeight());
 }
 
-}
-}
+} // namespace layers
+} // namespace mozilla

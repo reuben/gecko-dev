@@ -2,41 +2,47 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* global Components, XPCOMUtils, Services, PluralForm, Logger, Rect, Utils,
+          States, Relations, Roles, dump, Events, PivotContext, PrefCache */
+/* exported Utils, Logger, PivotContext, PrefCache, SettingCache */
+
 'use strict';
 
-const Cu = Components.utils;
-const Cc = Components.classes;
-const Ci = Components.interfaces;
+const {classes: Cc, utils: Cu, interfaces: Ci} = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, 'Services',
+Cu.import('resource://gre/modules/XPCOMUtils.jsm');
+XPCOMUtils.defineLazyModuleGetter(this, 'Services', // jshint ignore:line
   'resource://gre/modules/Services.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'Rect',
+XPCOMUtils.defineLazyModuleGetter(this, 'Rect', // jshint ignore:line
   'resource://gre/modules/Geometry.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'Roles',
+XPCOMUtils.defineLazyModuleGetter(this, 'Roles', // jshint ignore:line
   'resource://gre/modules/accessibility/Constants.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'Events',
+XPCOMUtils.defineLazyModuleGetter(this, 'Events', // jshint ignore:line
   'resource://gre/modules/accessibility/Constants.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'Relations',
+XPCOMUtils.defineLazyModuleGetter(this, 'Relations', // jshint ignore:line
   'resource://gre/modules/accessibility/Constants.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, 'States',
+XPCOMUtils.defineLazyModuleGetter(this, 'States', // jshint ignore:line
   'resource://gre/modules/accessibility/Constants.jsm');
+XPCOMUtils.defineLazyModuleGetter(this, 'PluralForm', // jshint ignore:line
+  'resource://gre/modules/PluralForm.jsm');
 
-this.EXPORTED_SYMBOLS = ['Utils', 'Logger', 'PivotContext', 'PrefCache', 'SettingCache'];
+this.EXPORTED_SYMBOLS = ['Utils', 'Logger', 'PivotContext', 'PrefCache',  // jshint ignore:line
+                         'SettingCache'];
 
-this.Utils = {
+this.Utils = { // jshint ignore:line
   _buildAppMap: {
     '{3c2e2abc-06d4-11e1-ac3b-374f68613e61}': 'b2g',
+    '{d1bfe7d9-c01e-4237-998b-7b5f960a4314}': 'graphene',
     '{ec8030f7-c20a-464f-9b0e-13a3a9e97384}': 'browser',
     '{aa3c5121-dab2-40e2-81ca-7ea25febc110}': 'mobile/android',
     '{a23983c0-fd0e-11dc-95ff-0800200c9a66}': 'mobile/xul'
   },
 
   init: function Utils_init(aWindow) {
-    if (this._win)
+    if (this._win) {
       // XXX: only supports attaching to one window now.
       throw new Error('Only one top-level window could used with AccessFu');
-
+    }
     this._win = Cu.getWeakReference(aWindow);
   },
 
@@ -77,34 +83,39 @@ this.Utils = {
   },
 
   get MozBuildApp() {
-    if (!this._buildApp)
+    if (!this._buildApp) {
       this._buildApp = this._buildAppMap[Services.appinfo.ID];
+    }
     return this._buildApp;
   },
 
   get OS() {
-    if (!this._OS)
+    if (!this._OS) {
       this._OS = Services.appinfo.OS;
+    }
     return this._OS;
   },
 
   get widgetToolkit() {
-    if (!this._widgetToolkit)
+    if (!this._widgetToolkit) {
       this._widgetToolkit = Services.appinfo.widgetToolkit;
+    }
     return this._widgetToolkit;
   },
 
   get ScriptName() {
-    if (!this._ScriptName)
+    if (!this._ScriptName) {
       this._ScriptName =
         (Services.appinfo.processType == 2) ? 'AccessFuContent' : 'AccessFu';
+    }
     return this._ScriptName;
   },
 
   get AndroidSdkVersion() {
     if (!this._AndroidSdkVersion) {
       if (Services.appinfo.OS == 'Android') {
-        this._AndroidSdkVersion = Services.sysinfo.getPropertyAsInt32('version');
+        this._AndroidSdkVersion = Services.sysinfo.getPropertyAsInt32(
+          'version');
       } else {
         // Most useful in desktop debugging.
         this._AndroidSdkVersion = 16;
@@ -138,8 +149,9 @@ this.Utils = {
     if (!this.BrowserApp) {
       return null;
     }
-    if (this.MozBuildApp == 'b2g')
+    if (this.MozBuildApp == 'b2g') {
       return this.BrowserApp.contentBrowser;
+    }
     return this.BrowserApp.selectedBrowser;
   },
 
@@ -149,14 +161,14 @@ this.Utils = {
   },
 
   get AllMessageManagers() {
-    let messageManagers = [];
+    let messageManagers = new Set();
 
     function collectLeafMessageManagers(mm) {
       for (let i = 0; i < mm.childCount; i++) {
         let childMM = mm.getChildAt(i);
 
-        if ("sendAsyncMessage" in childMM) {
-          messageManagers.push(childMM);
+        if ('sendAsyncMessage' in childMM) {
+          messageManagers.add(childMM);
         } else {
           collectLeafMessageManagers(childMM);
         }
@@ -168,12 +180,19 @@ this.Utils = {
     let document = this.CurrentContentDoc;
 
     if (document) {
+      if (document.location.host === 'b2g') {
+        // The document is a b2g app chrome (ie. Mulet).
+        let contentBrowser = this.win.content.shell.contentBrowser;
+        messageManagers.add(this.getMessageManager(contentBrowser));
+        document = contentBrowser.contentDocument;
+      }
+
       let remoteframes = document.querySelectorAll('iframe');
 
       for (let i = 0; i < remoteframes.length; ++i) {
         let mm = this.getMessageManager(remoteframes[i]);
         if (mm) {
-          messageManagers.push(mm);
+          messageManagers.add(mm);
         }
       }
 
@@ -189,10 +208,48 @@ this.Utils = {
     return this.isContentProcess;
   },
 
+  localize: function localize(aOutput) {
+    let outputArray = Array.isArray(aOutput) ? aOutput : [aOutput];
+    let localized =
+      outputArray.map(details => this.stringBundle.get(details));
+    // Clean up the white space.
+    return localized.filter(word => word).map(word => word.trim()).
+      filter(trimmed => trimmed);
+  },
+
   get stringBundle() {
     delete this.stringBundle;
-    this.stringBundle = Services.strings.createBundle(
+    let bundle = Services.strings.createBundle(
       'chrome://global/locale/AccessFu.properties');
+    this.stringBundle = {
+      get: function stringBundle_get(aDetails = {}) {
+        if (!aDetails || typeof aDetails === 'string') {
+          return aDetails;
+        }
+        let str = '';
+        let string = aDetails.string;
+        if (!string) {
+          return str;
+        }
+        try {
+          let args = aDetails.args;
+          let count = aDetails.count;
+          if (args) {
+            str = bundle.formatStringFromName(string, args, args.length);
+          } else {
+            str = bundle.GetStringFromName(string);
+          }
+          if (count) {
+            str = PluralForm.get(count, str);
+            str = str.replace('#1', count);
+          }
+        } catch (e) {
+          Logger.debug('Failed to get a string from a bundle for', string);
+        } finally {
+          return str;
+        }
+      }
+    };
     return this.stringBundle;
   },
 
@@ -202,15 +259,6 @@ this.Utils = {
          frameLoader.messageManager;
     } catch (x) {
       return null;
-    }
-  },
-
-  getViewport: function getViewport(aWindow) {
-    switch (this.MozBuildApp) {
-      case 'mobile/android':
-        return aWindow.BrowserApp.selectedTab.getViewport();
-      default:
-        return null;
     }
   },
 
@@ -252,18 +300,37 @@ this.Utils = {
     return doc.QueryInterface(Ci.nsIAccessibleDocument).virtualCursor;
   },
 
-  getBounds: function getBounds(aAccessible) {
-      let objX = {}, objY = {}, objW = {}, objH = {};
-      aAccessible.getBounds(objX, objY, objW, objH);
-      return new Rect(objX.value, objY.value, objW.value, objH.value);
+  getContentResolution: function _getContentResolution(aAccessible) {
+    let res = { value: 1 };
+    aAccessible.document.window.QueryInterface(
+      Ci.nsIInterfaceRequestor).getInterface(
+      Ci.nsIDOMWindowUtils).getResolution(res);
+    return res.value;
   },
 
-  getTextBounds: function getTextBounds(aAccessible, aStart, aEnd) {
-      let accText = aAccessible.QueryInterface(Ci.nsIAccessibleText);
-      let objX = {}, objY = {}, objW = {}, objH = {};
-      accText.getRangeExtents(aStart, aEnd, objX, objY, objW, objH,
-                              Ci.nsIAccessibleCoordinateType.COORDTYPE_SCREEN_RELATIVE);
-      return new Rect(objX.value, objY.value, objW.value, objH.value);
+  getBounds: function getBounds(aAccessible, aPreserveContentScale) {
+    let objX = {}, objY = {}, objW = {}, objH = {};
+    aAccessible.getBounds(objX, objY, objW, objH);
+
+    let scale = aPreserveContentScale ? 1 :
+      this.getContentResolution(aAccessible);
+
+    return new Rect(objX.value, objY.value, objW.value, objH.value).scale(
+      scale, scale);
+  },
+
+  getTextBounds: function getTextBounds(aAccessible, aStart, aEnd,
+                                        aPreserveContentScale) {
+    let accText = aAccessible.QueryInterface(Ci.nsIAccessibleText);
+    let objX = {}, objY = {}, objW = {}, objH = {};
+    accText.getRangeExtents(aStart, aEnd, objX, objY, objW, objH,
+      Ci.nsIAccessibleCoordinateType.COORDTYPE_SCREEN_RELATIVE);
+
+    let scale = aPreserveContentScale ? 1 :
+      this.getContentResolution(aAccessible);
+
+    return new Rect(objX.value, objY.value, objW.value, objH.value).scale(
+      scale, scale);
   },
 
   /**
@@ -277,6 +344,21 @@ this.Utils = {
 
   isInSubtree: function isInSubtree(aAccessible, aSubTreeRoot) {
     let acc = aAccessible;
+
+    // If aSubTreeRoot is an accessible document, we will only walk up the
+    // ancestry of documents and skip everything else.
+    if (aSubTreeRoot instanceof Ci.nsIAccessibleDocument) {
+      while (acc) {
+        let parentDoc = acc instanceof Ci.nsIAccessibleDocument ?
+          acc.parentDocument : acc.document;
+        if (parentDoc === aSubTreeRoot) {
+          return true;
+        }
+        acc = parentDoc;
+      }
+      return false;
+    }
+
     while (acc) {
       if (acc == aSubTreeRoot) {
         return true;
@@ -293,10 +375,26 @@ this.Utils = {
     return false;
   },
 
+  isHidden: function isHidden(aAccessible) {
+    // Need to account for aria-hidden, so can't just check for INVISIBLE
+    // state.
+    let hidden = Utils.getAttributes(aAccessible).hidden;
+    return hidden && hidden === 'true';
+  },
+
+  visibleChildCount: function visibleChildCount(aAccessible) {
+    let count = 0;
+    for (let child = aAccessible.firstChild; child; child = child.nextSibling) {
+      if (!this.isHidden(child)) {
+        ++count;
+      }
+    }
+    return count;
+  },
+
   inHiddenSubtree: function inHiddenSubtree(aAccessible) {
     for (let acc=aAccessible; acc; acc=acc.parent) {
-      let hidden = Utils.getAttributes(acc).hidden;
-      if (hidden && JSON.parse(hidden)) {
+      if (this.isHidden(acc)) {
         return true;
       }
     }
@@ -332,21 +430,41 @@ this.Utils = {
   },
 
   getLandmarkName: function getLandmarkName(aAccessible) {
-    const landmarks = [
+    return this.matchRoles(aAccessible, [
       'banner',
       'complementary',
       'contentinfo',
       'main',
       'navigation',
       'search'
-    ];
+    ]);
+  },
+
+  getMathRole: function getMathRole(aAccessible) {
+    return this.matchRoles(aAccessible, [
+      'base',
+      'close-fence',
+      'denominator',
+      'numerator',
+      'open-fence',
+      'overscript',
+      'presubscript',
+      'presuperscript',
+      'root-index',
+      'subscript',
+      'superscript',
+      'underscript'
+    ]);
+  },
+
+  matchRoles: function matchRoles(aAccessible, aRoles) {
     let roles = this.getAttributes(aAccessible)['xml-roles'];
     if (!roles) {
       return;
     }
 
-    // Looking up a role that would match a landmark.
-    return this.matchAttributeValue(roles, landmarks);
+    // Looking up a role that would match any in the provided roles.
+    return this.matchAttributeValue(roles, aRoles);
   },
 
   getEmbeddedControl: function getEmbeddedControl(aLabel) {
@@ -372,6 +490,37 @@ this.Utils = {
 
     return parent.role === Roles.LISTITEM && parent.childCount > 1 &&
       aStaticText.indexInParent === 0;
+  },
+
+  dispatchChromeEvent: function dispatchChromeEvent(aType, aDetails) {
+    let details = {
+      type: aType,
+      details: JSON.stringify(
+        typeof aDetails === 'string' ? { eventType : aDetails } : aDetails)
+    };
+    let window = this.win;
+    let shell = window.shell || window.content.shell;
+    if (shell) {
+      // On B2G device.
+      shell.sendChromeEvent(details);
+    } else {
+      // Dispatch custom event to have support for desktop and screen reader
+      // emulator add-on.
+      window.dispatchEvent(new window.CustomEvent(aType, {
+        bubbles: true,
+        cancelable: true,
+        detail: details
+      }));
+    }
+
+  },
+
+  isActivatableOnFingerUp: function isActivatableOnFingerUp(aAccessible) {
+    if (aAccessible.role === Roles.KEY) {
+      return true;
+    }
+    let quick_activate = this.getAttributes(aAccessible)['moz-quick-activate'];
+    return quick_activate && JSON.parse(quick_activate);
   }
 };
 
@@ -400,24 +549,26 @@ State.prototype = {
   }
 };
 
-this.Logger = {
+this.Logger = { // jshint ignore:line
+  GESTURE: -1,
   DEBUG: 0,
   INFO: 1,
   WARNING: 2,
   ERROR: 3,
-  _LEVEL_NAMES: ['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+  _LEVEL_NAMES: ['GESTURE', 'DEBUG', 'INFO', 'WARNING', 'ERROR'],
 
   logLevel: 1, // INFO;
 
   test: false,
 
   log: function log(aLogLevel) {
-    if (aLogLevel < this.logLevel)
+    if (aLogLevel < this.logLevel) {
       return;
+    }
 
     let args = Array.prototype.slice.call(arguments, 1);
     let message = (typeof(args[0]) === 'function' ? args[0]() : args).join(' ');
-    message = '[' + Utils.ScriptName + '] ' + this._LEVEL_NAMES[aLogLevel] +
+    message = '[' + Utils.ScriptName + '] ' + this._LEVEL_NAMES[aLogLevel + 1] +
       ' ' + message + '\n';
     dump(message);
     // Note: used for testing purposes. If |this.test| is true, also log to
@@ -434,6 +585,11 @@ this.Logger = {
   info: function info() {
     this.log.apply(
       this, [this.INFO].concat(Array.prototype.slice.call(arguments)));
+  },
+
+  gesture: function gesture() {
+    this.log.apply(
+      this, [this.GESTURE].concat(Array.prototype.slice.call(arguments)));
   },
 
   debug: function debug() {
@@ -467,7 +623,8 @@ this.Logger = {
         }
         stackMessage = stackLines.join('\n');
       } else {
-        stackMessage = '(' + aException.fileName + ':' + aException.lineNumber + ')';
+        stackMessage =
+          '(' + aException.fileName + ':' + aException.lineNumber + ')';
       }
       this.error(aErrorMessage + ':\n ' +
                  aException.message + '\n' +
@@ -478,14 +635,16 @@ this.Logger = {
   },
 
   accessibleToString: function accessibleToString(aAccessible) {
-    let str = '[ defunct ]';
-    try {
-      str = '[ ' + Utils.AccRetrieval.getStringRole(aAccessible.role) +
-        ' | ' + aAccessible.name + ' ]';
-    } catch (x) {
+    if (!aAccessible) {
+      return '[ null ]';
     }
 
-    return str;
+    try {
+      return'[ ' + Utils.AccRetrieval.getStringRole(aAccessible.role) +
+        ' | ' + aAccessible.name + ' ]';
+    } catch (x) {
+      return '[ defunct ]';
+    }
   },
 
   eventToString: function eventToString(aEvent) {
@@ -515,21 +674,26 @@ this.Logger = {
   },
 
   dumpTree: function dumpTree(aLogLevel, aRootAccessible) {
-    if (aLogLevel < this.logLevel)
+    if (aLogLevel < this.logLevel) {
       return;
+    }
 
     this._dumpTreeInternal(aLogLevel, aRootAccessible, 0);
   },
 
-  _dumpTreeInternal: function _dumpTreeInternal(aLogLevel, aAccessible, aIndent) {
-    let indentStr = '';
-    for (var i=0; i < aIndent; i++)
-      indentStr += ' ';
-    this.log(aLogLevel, indentStr,
-             this.accessibleToString(aAccessible),
-             '(' + this.statesToString(aAccessible) + ')');
-    for (var i=0; i < aAccessible.childCount; i++)
-      this._dumpTreeInternal(aLogLevel, aAccessible.getChildAt(i), aIndent + 1);
+  _dumpTreeInternal:
+    function _dumpTreeInternal(aLogLevel, aAccessible, aIndent) {
+      let indentStr = '';
+      for (let i = 0; i < aIndent; i++) {
+        indentStr += ' ';
+      }
+      this.log(aLogLevel, indentStr,
+               this.accessibleToString(aAccessible),
+               '(' + this.statesToString(aAccessible) + ')');
+      for (let i = 0; i < aAccessible.childCount; i++) {
+        this._dumpTreeInternal(aLogLevel, aAccessible.getChildAt(i),
+          aIndent + 1);
+      }
     }
 };
 
@@ -543,7 +707,7 @@ this.Logger = {
  * label. In this case the |accessible| field would be the embedded control,
  * and the |accessibleForBounds| field would be the label.
  */
-this.PivotContext = function PivotContext(aAccessible, aOldAccessible,
+this.PivotContext = function PivotContext(aAccessible, aOldAccessible, // jshint ignore:line
   aStartOffset, aEndOffset, aIgnoreAncestry = false,
   aIncludeInvisible = false) {
   this._accessible = aAccessible;
@@ -554,7 +718,7 @@ this.PivotContext = function PivotContext(aAccessible, aOldAccessible,
   this.endOffset = aEndOffset;
   this._ignoreAncestry = aIgnoreAncestry;
   this._includeInvisible = aIncludeInvisible;
-}
+};
 
 PivotContext.prototype = {
   get accessible() {
@@ -584,8 +748,10 @@ PivotContext.prototype = {
       let result = {startOffset: this.startOffset,
                     endOffset: this.endOffset,
                     text: this._accessible.QueryInterface(Ci.nsIAccessibleText).
-                          getText(0, Ci.nsIAccessibleText.TEXT_OFFSET_END_OF_TEXT)};
-      let hypertextAcc = this._accessible.QueryInterface(Ci.nsIAccessibleHyperText);
+                          getText(0,
+                            Ci.nsIAccessibleText.TEXT_OFFSET_END_OF_TEXT)};
+      let hypertextAcc = this._accessible.QueryInterface(
+        Ci.nsIAccessibleHyperText);
 
       // Iterate through the links in backwards order so text replacements don't
       // affect the offsets of links yet to be processed.
@@ -594,7 +760,8 @@ PivotContext.prototype = {
         let linkText = '';
         if (link instanceof Ci.nsIAccessibleText) {
           linkText = link.QueryInterface(Ci.nsIAccessibleText).
-                          getText(0, Ci.nsIAccessibleText.TEXT_OFFSET_END_OF_TEXT);
+                          getText(0,
+                            Ci.nsIAccessibleText.TEXT_OFFSET_END_OF_TEXT);
         }
 
         let start = link.startIndex;
@@ -666,9 +833,9 @@ PivotContext.prototype = {
    */
   get newAncestry() {
     if (!this._newAncestry) {
-      this._newAncestry = this._ignoreAncestry ? [] : [currentAncestor for (
-        [index, currentAncestor] of Iterator(this.currentAncestry)) if (
-          currentAncestor !== this.oldAncestry[index])];
+      this._newAncestry = this._ignoreAncestry ? [] :
+        this.currentAncestry.filter(
+          (currentAncestor, i) => currentAncestor !== this.oldAncestry[i]);
     }
     return this._newAncestry;
   },
@@ -679,7 +846,7 @@ PivotContext.prototype = {
    * Note: needSubtree is a function argument that can be used to determine
    * whether aAccessible's subtree is required.
    */
-  _traverse: function _traverse(aAccessible, aPreorder, aStop) {
+  _traverse: function* _traverse(aAccessible, aPreorder, aStop) {
     if (aStop && aStop(aAccessible)) {
       return;
     }
@@ -689,19 +856,43 @@ PivotContext.prototype = {
       if (this._includeInvisible) {
         include = true;
       } else {
-        include = !(Utils.getState(child).contains(States.INVISIBLE));
+        include = !Utils.isHidden(child);
       }
       if (include) {
         if (aPreorder) {
           yield child;
-          [yield node for (node of this._traverse(child, aPreorder, aStop))];
+          for (let node of this._traverse(child, aPreorder, aStop)) {
+            yield node;
+          }
         } else {
-          [yield node for (node of this._traverse(child, aPreorder, aStop))];
+          for (let node of this._traverse(child, aPreorder, aStop)) {
+            yield node;
+          }
           yield child;
         }
       }
       child = child.nextSibling;
     }
+  },
+
+  /**
+   * Get interaction hints for the context ancestry.
+   * @return {Array} Array of interaction hints.
+   */
+  get interactionHints() {
+    let hints = [];
+    this.newAncestry.concat(this.accessible).reverse().forEach(aAccessible => {
+      let hint = Utils.getAttributes(aAccessible)['moz-hint'];
+      if (hint) {
+        hints.push(hint);
+      } else if (aAccessible.actionCount > 0) {
+        hints.push({
+          string: Utils.AccRetrieval.getStringRole(
+            aAccessible.role).replace(/\s/g, '') + '-hint'
+        });
+      }
+    });
+    return hints;
   },
 
   /*
@@ -732,8 +923,12 @@ PivotContext.prototype = {
       if (!aAccessible) {
         return null;
       }
-      if ([Roles.CELL, Roles.COLUMNHEADER, Roles.ROWHEADER].indexOf(
-        aAccessible.role) < 0) {
+      if ([
+            Roles.CELL,
+            Roles.COLUMNHEADER,
+            Roles.ROWHEADER,
+            Roles.MATHML_CELL
+          ].indexOf(aAccessible.role) < 0) {
           return null;
       }
       try {
@@ -743,7 +938,7 @@ PivotContext.prototype = {
         return null;
       }
     };
-    let getHeaders = function getHeaders(aHeaderCells) {
+    let getHeaders = function* getHeaders(aHeaderCells) {
       let enumerator = aHeaderCells.enumerate();
       while (enumerator.hasMoreElements()) {
         yield enumerator.getNext().QueryInterface(Ci.nsIAccessible).name;
@@ -794,13 +989,13 @@ PivotContext.prototype = {
     cellInfo.columnHeaders = [];
     if (cellInfo.columnChanged && cellInfo.current.role !==
       Roles.COLUMNHEADER) {
-      cellInfo.columnHeaders = [headers for (headers of getHeaders(
-        cellInfo.current.columnHeaderCells))];
+      cellInfo.columnHeaders = [...getHeaders(cellInfo.current.columnHeaderCells)];
     }
     cellInfo.rowHeaders = [];
-    if (cellInfo.rowChanged && cellInfo.current.role === Roles.CELL) {
-      cellInfo.rowHeaders = [headers for (headers of getHeaders(
-        cellInfo.current.rowHeaderCells))];
+    if (cellInfo.rowChanged &&
+        (cellInfo.current.role === Roles.CELL ||
+         cellInfo.current.role === Roles.MATHML_CELL)) {
+      cellInfo.rowHeaders = [...getHeaders(cellInfo.current.rowHeaderCells)];
     }
 
     this._cells.set(domNode, cellInfo);
@@ -824,7 +1019,7 @@ PivotContext.prototype = {
   }
 };
 
-this.PrefCache = function PrefCache(aName, aCallback, aRunCallbackNow) {
+this.PrefCache = function PrefCache(aName, aCallback, aRunCallbackNow) { // jshint ignore:line
   this.name = aName;
   this.callback = aCallback;
 
@@ -833,7 +1028,7 @@ this.PrefCache = function PrefCache(aName, aCallback, aRunCallbackNow) {
 
   if (this.callback && aRunCallbackNow) {
     try {
-      this.callback(this.name, this.value);
+      this.callback(this.name, this.value, true);
     } catch (x) {
       Logger.logException(x);
     }
@@ -864,11 +1059,12 @@ PrefCache.prototype = {
     }
   },
 
-  observe: function observe(aSubject, aTopic, aData) {
+  observe: function observe(aSubject) {
     this.value = this._getValue(aSubject.QueryInterface(Ci.nsIPrefBranch));
+    Logger.info('pref changed', this.name, this.value);
     if (this.callback) {
       try {
-        this.callback(this.name, this.value);
+        this.callback(this.name, this.value, false);
       } catch (x) {
         Logger.logException(x);
       }
@@ -879,7 +1075,7 @@ PrefCache.prototype = {
                                           Ci.nsISupportsWeakReference])
 };
 
-this.SettingCache = function SettingCache(aName, aCallback, aOptions = {}) {
+this.SettingCache = function SettingCache(aName, aCallback, aOptions = {}) { // jshint ignore:line
   this.value = aOptions.defaultValue;
   let runCallback = () => {
     if (aCallback) {
@@ -903,7 +1099,8 @@ this.SettingCache = function SettingCache(aName, aCallback, aOptions = {}) {
   let req = lock.get(aName);
 
   req.addEventListener('success', () => {
-    this.value = req.result[aName] == undefined ? aOptions.defaultValue : req.result[aName];
+    this.value = req.result[aName] === undefined ?
+      aOptions.defaultValue : req.result[aName];
     if (aOptions.callbackNow) {
       runCallback();
     }

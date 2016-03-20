@@ -59,9 +59,9 @@ function BannerMessage(options) {
 
 // We need this object to have access to the HomeBanner
 // private members without leaking it outside Home.jsm.
-let HomeBannerMessageHandlers;
+var HomeBannerMessageHandlers;
 
-let HomeBanner = (function () {
+var HomeBanner = (function () {
   // Whether there is a "HomeBanner:Get" request we couldn't fulfill.
   let _pendingRequest = false;
 
@@ -94,7 +94,7 @@ let HomeBanner = (function () {
     for (let key in _messages) {
       let message = _messages[key];
       if (threshold < message.totalWeight) {
-        sendMessageToJava({
+        Messaging.sendRequest({
           type: "HomeBanner:Data",
           id: message.id,
           text: message.text,
@@ -190,9 +190,9 @@ let HomeBanner = (function () {
 
 // We need this object to have access to the HomePanels
 // private members without leaking it outside Home.jsm.
-let HomePanelsMessageHandlers;
+var HomePanelsMessageHandlers;
 
-let HomePanels = (function () {
+var HomePanels = (function () {
   // Functions used to handle messages sent from Java.
   HomePanelsMessageHandlers = {
 
@@ -214,7 +214,7 @@ let HomePanels = (function () {
         }
       }
 
-      sendMessageToJava({
+      Messaging.sendRequest({
         type: "HomePanels:Data",
         panels: panels,
         requestId: requestId
@@ -301,7 +301,8 @@ let HomePanels = (function () {
   // Valid item types for a panel view.
   let Item = Object.freeze({
     ARTICLE: "article",
-    IMAGE: "image"
+    IMAGE: "image",
+    ICON: "icon"
   });
 
   // Valid item handlers for a panel view.
@@ -315,6 +316,7 @@ let HomePanels = (function () {
     this.title = options.title;
     this.layout = options.layout;
     this.views = options.views;
+    this.default = !!options.default;
 
     if (!this.id || !this.title) {
       throw "Home.panels: Can't create a home panel without an id and title!";
@@ -378,6 +380,10 @@ let HomePanels = (function () {
         this.authConfig.imageUrl = options.auth.imageUrl;
       }
     }
+
+    if (options.position >= 0) {
+      this.position = options.position;
+    }
   }
 
   let _generatePanel = function(id) {
@@ -429,7 +435,7 @@ let HomePanels = (function () {
     install: function(id) {
       _assertPanelExists(id);
 
-      sendMessageToJava({
+      Messaging.sendRequest({
         type: "HomePanels:Install",
         panel: _generatePanel(id)
       });
@@ -438,7 +444,7 @@ let HomePanels = (function () {
     uninstall: function(id) {
       _assertPanelExists(id);
 
-      sendMessageToJava({
+      Messaging.sendRequest({
         type: "HomePanels:Uninstall",
         id: id
       });
@@ -447,7 +453,7 @@ let HomePanels = (function () {
     update: function(id) {
       _assertPanelExists(id);
 
-      sendMessageToJava({
+      Messaging.sendRequest({
         type: "HomePanels:Update",
         panel: _generatePanel(id)
       });

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,40 +13,40 @@
 #include "nsIFactory.h"
 
 
-NS_COM_GLUE nsresult CallCreateInstance(const nsCID& aClass,
-                                        nsISupports* aDelegate,
-                                        const nsIID& aIID, void** aResult);
+nsresult CallCreateInstance(const nsCID& aClass, nsISupports* aDelegate,
+                            const nsIID& aIID, void** aResult);
 
-NS_COM_GLUE nsresult CallCreateInstance(const char* aContractID,
-                                        nsISupports* aDelegate,
-                                        const nsIID& aIID, void** aResult);
+nsresult CallCreateInstance(const char* aContractID, nsISupports* aDelegate,
+                            const nsIID& aIID, void** aResult);
 
-NS_COM_GLUE nsresult CallGetClassObject(const nsCID& aClass, const nsIID& aIID,
-                                        void** aResult);
+nsresult CallGetClassObject(const nsCID& aClass, const nsIID& aIID,
+                            void** aResult);
 
-NS_COM_GLUE nsresult CallGetClassObject(const char* aContractID,
-                                        const nsIID& aIID, void** aResult);
+nsresult CallGetClassObject(const char* aContractID, const nsIID& aIID,
+                            void** aResult);
 
 
-class NS_COM_GLUE nsCreateInstanceByCID : public nsCOMPtr_helper
+class MOZ_STACK_CLASS nsCreateInstanceByCID final : public nsCOMPtr_helper
 {
 public:
-  nsCreateInstanceByCID(const nsCID& aCID, nsISupports* aOuter, nsresult* aErrorPtr)
+  nsCreateInstanceByCID(const nsCID& aCID, nsISupports* aOuter,
+                        nsresult* aErrorPtr)
     : mCID(aCID)
     , mOuter(aOuter)
     , mErrorPtr(aErrorPtr)
   {
   }
 
-  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const;
+  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const
+    override;
 
 private:
   const nsCID&    mCID;
-  nsISupports*    mOuter;
+  nsISupports* MOZ_NON_OWNING_REF mOuter;
   nsresult*       mErrorPtr;
 };
 
-class NS_COM_GLUE nsCreateInstanceByContractID : public nsCOMPtr_helper
+class MOZ_STACK_CLASS nsCreateInstanceByContractID final : public nsCOMPtr_helper
 {
 public:
   nsCreateInstanceByContractID(const char* aContractID, nsISupports* aOuter,
@@ -56,15 +57,15 @@ public:
   {
   }
 
-  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const;
+  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const override;
 
 private:
   const char*   mContractID;
-  nsISupports*  mOuter;
+  nsISupports* MOZ_NON_OWNING_REF mOuter;
   nsresult*     mErrorPtr;
 };
 
-class NS_COM_GLUE nsCreateInstanceFromFactory : public nsCOMPtr_helper
+class MOZ_STACK_CLASS nsCreateInstanceFromFactory final : public nsCOMPtr_helper
 {
 public:
   nsCreateInstanceFromFactory(nsIFactory* aFactory, nsISupports* aOuter,
@@ -75,11 +76,11 @@ public:
   {
   }
 
-  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const;
+  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const override;
 
 private:
-  nsIFactory*   mFactory;
-  nsISupports*  mOuter;
+  nsIFactory* MOZ_NON_OWNING_REF mFactory;
+  nsISupports* MOZ_NON_OWNING_REF mOuter;
   nsresult*     mErrorPtr;
 };
 
@@ -123,7 +124,7 @@ do_CreateInstance(nsIFactory* aFactory, nsISupports* aOuter,
 }
 
 
-class NS_COM_GLUE nsGetClassObjectByCID : public nsCOMPtr_helper
+class MOZ_STACK_CLASS nsGetClassObjectByCID final : public nsCOMPtr_helper
 {
 public:
   nsGetClassObjectByCID(const nsCID& aCID, nsresult* aErrorPtr)
@@ -132,14 +133,14 @@ public:
   {
   }
 
-  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const;
+  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const override;
 
 private:
   const nsCID&    mCID;
   nsresult*       mErrorPtr;
 };
 
-class NS_COM_GLUE nsGetClassObjectByContractID : public nsCOMPtr_helper
+class MOZ_STACK_CLASS nsGetClassObjectByContractID final : public nsCOMPtr_helper
 {
 public:
   nsGetClassObjectByContractID(const char* aContractID, nsresult* aErrorPtr)
@@ -148,7 +149,7 @@ public:
   {
   }
 
-  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const;
+  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const override;
 
 private:
   const char*   mContractID;

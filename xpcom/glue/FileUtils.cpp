@@ -1,5 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -141,8 +142,8 @@ mozilla::ReadSysFile(
   ssize_t bytesRead;
   size_t offset = 0;
   do {
-    bytesRead = MOZ_TEMP_FAILURE_RETRY(
-      read(fd, aBuf + offset, aBufSize - offset));
+    bytesRead = MOZ_TEMP_FAILURE_RETRY(read(fd, aBuf + offset,
+                                            aBufSize - offset));
     if (bytesRead == -1) {
       return false;
     }
@@ -186,6 +187,35 @@ mozilla::ReadSysFile(
 }
 
 #endif /* ReadSysFile_PRESENT */
+
+#ifdef WriteSysFile_PRESENT
+
+bool
+mozilla::WriteSysFile(
+  const char* aFilename,
+  const char* aBuf)
+{
+  size_t aBufSize = strlen(aBuf);
+  int fd = MOZ_TEMP_FAILURE_RETRY(open(aFilename, O_WRONLY));
+  if (fd < 0) {
+    return false;
+  }
+  ScopedClose autoClose(fd);
+  ssize_t bytesWritten;
+  size_t offset = 0;
+  do {
+    bytesWritten = MOZ_TEMP_FAILURE_RETRY(write(fd, aBuf + offset,
+                                                aBufSize - offset));
+    if (bytesWritten == -1) {
+      return false;
+    }
+    offset += bytesWritten;
+  } while (bytesWritten > 0 && offset < aBufSize);
+  MOZ_ASSERT(offset == aBufSize);
+  return true;
+}
+
+#endif /* WriteSysFile_PRESENT */
 
 void
 mozilla::ReadAheadLib(nsIFile* aFile)
@@ -270,7 +300,7 @@ static const uint32_t CPU_TYPE = CPU_TYPE_POWERPC64;
 class ScopedMMap
 {
 public:
-  ScopedMMap(const char* aFilePath)
+  explicit ScopedMMap(const char* aFilePath)
     : buf(nullptr)
   {
     fd = open(aFilePath, O_RDONLY);
@@ -393,7 +423,11 @@ mozilla::ReadAheadLib(mozilla::pathstr_t aFilePath)
   if ((read(fd, elf.buf, bufsize) <= 0) ||
       (memcmp(elf.buf, ELFMAG, 4)) ||
       (elf.ehdr.e_ident[EI_CLASS] != ELFCLASS) ||
-      (elf.ehdr.e_phoff + elf.ehdr.e_phentsize * elf.ehdr.e_phnum >= bufsize)) {
+      // Upcast e_phentsize so the multiplication is done in the same precision
+      // as the subsequent addition, to satisfy static analyzers and avoid
+      // issues with abnormally large program header tables.
+      (elf.ehdr.e_phoff + (static_cast<Elf_Off>(elf.ehdr.e_phentsize) *
+                           elf.ehdr.e_phnum) >= bufsize)) {
     close(fd);
     return;
   }

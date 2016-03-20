@@ -13,11 +13,19 @@
 /**
  * A simple class for writing .gz files.
  */
-class nsGZFileWriter : public nsIGZFileWriter
+class nsGZFileWriter final : public nsIGZFileWriter
 {
-public:
-  nsGZFileWriter();
   virtual ~nsGZFileWriter();
+
+public:
+
+  enum Operation {
+    Append,
+    Create
+  };
+
+
+  explicit nsGZFileWriter(Operation aMode = Create);
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIGZFILEWRITER
@@ -38,6 +46,7 @@ public:
   }
 
 private:
+  Operation mMode;
   bool mInitialized;
   bool mFinished;
   gzFile mGZFile;

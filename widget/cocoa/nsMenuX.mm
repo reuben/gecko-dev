@@ -36,7 +36,7 @@
 #include "nsBindingManager.h"
 #include "nsIServiceManager.h"
 #include "nsXULPopupManager.h"
-#include "nsCxPusher.h"
+#include "mozilla/dom/ScriptSettings.h"
 
 #include "jsapi.h"
 #include "nsIScriptGlobalObject.h"
@@ -51,7 +51,6 @@ static bool gConstructingMenu = false;
 static bool gMenuMethodsSwizzled = false;
 
 int32_t nsMenuX::sIndexingMenuLevel = 0;
-using mozilla::AutoPushJSContext;
 
 
 //
@@ -63,7 +62,6 @@ using mozilla::AutoPushJSContext;
 - (id) initWithMenuGroupOwner:(nsMenuGroupOwnerX *)aMenuGroupOwner
 {
   if ((self = [super init]) != nil) {
-    mMenuGroupOwner = nullptr;
     [self setMenuGroupOwner:aMenuGroupOwner];
   }
   return self;
@@ -84,6 +82,9 @@ using mozilla::AutoPushJSContext;
 {
   // weak reference as the nsMenuGroupOwnerX owns all of its sub-objects
   mMenuGroupOwner = aMenuGroupOwner;
+  if (aMenuGroupOwner) {
+    aMenuGroupOwner->AddMenuItemInfoToSet(self);
+  }
 }
 
 @end
@@ -354,7 +355,7 @@ nsEventStatus nsMenuX::MenuOpened()
   }
 
   nsEventStatus status = nsEventStatus_eIgnore;
-  WidgetMouseEvent event(true, NS_XUL_POPUP_SHOWN, nullptr,
+  WidgetMouseEvent event(true, eXULPopupShown, nullptr,
                          WidgetMouseEvent::eReal);
 
   nsCOMPtr<nsIContent> popupContent;
@@ -378,7 +379,7 @@ void nsMenuX::MenuClosed()
     mContent->UnsetAttr(kNameSpaceID_None, nsGkAtoms::open, true);
 
     nsEventStatus status = nsEventStatus_eIgnore;
-    WidgetMouseEvent event(true, NS_XUL_POPUP_HIDDEN, nullptr,
+    WidgetMouseEvent event(true, eXULPopupHidden, nullptr,
                            WidgetMouseEvent::eReal);
 
     nsCOMPtr<nsIContent> popupContent;
@@ -416,21 +417,15 @@ void nsMenuX::MenuConstruct()
       do_GetService(nsIXPConnect::GetCID(), &rv);
     if (NS_SUCCEEDED(rv)) {
       nsIDocument* ownerDoc = menuPopup->OwnerDoc();
-      nsCOMPtr<nsIScriptGlobalObject> sgo;
-      if (ownerDoc && (sgo = do_QueryInterface(ownerDoc->GetWindow()))) {
-        nsCOMPtr<nsIScriptContext> scriptContext = sgo->GetContext();
-        JSObject* global = sgo->GetGlobalJSObject();
-        if (scriptContext && global) {
-          AutoPushJSContext cx(scriptContext->GetNativeContext());
-          if (cx) {
-            nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
-            xpconnect->WrapNative(cx, global,
-                                  menuPopup, NS_GET_IID(nsISupports),
-                                  getter_AddRefs(wrapper));
-            mXBLAttached = true;
-          }
-        }
-      } 
+      dom::AutoJSAPI jsapi;
+      if (ownerDoc && jsapi.Init(ownerDoc->GetInnerWindow())) {
+        JSContext* cx = jsapi.cx();
+        JS::RootedObject ignoredObj(cx);
+        nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
+        xpconnect->WrapNative(cx, JS::CurrentGlobalOrNull(cx), menuPopup,
+                              NS_GET_IID(nsISupports), ignoredObj.address());
+        mXBLAttached = true;
+      }
     }
   }
 
@@ -440,11 +435,12 @@ void nsMenuX::MenuConstruct()
     nsIContent *child = menuPopup->GetChildAt(i);
     if (child) {
       // depending on the type, create a menu item, separator, or submenu
-      nsIAtom *tag = child->Tag();
-      if (tag == nsGkAtoms::menuitem || tag == nsGkAtoms::menuseparator)
+      if (child->IsAnyOfXULElements(nsGkAtoms::menuitem,
+                                    nsGkAtoms::menuseparator)) {
         LoadMenuItem(child);
-      else if (tag == nsGkAtoms::menu)
+      } else if (child->IsXULElement(nsGkAtoms::menu)) {
         LoadSubMenu(child);
+      }
     }
   } // for each menu item
 
@@ -509,7 +505,7 @@ void nsMenuX::LoadMenuItem(nsIContent* inMenuItemContent)
   // printf("menuitem %s \n", NS_LossyConvertUTF16toASCII(menuitemName).get());
 
   EMenuItemType itemType = eRegularMenuItemType;
-  if (inMenuItemContent->Tag() == nsGkAtoms::menuseparator) {
+  if (inMenuItemContent->IsXULElement(nsGkAtoms::menuseparator)) {
     itemType = eSeparatorMenuItemType;
   }
   else {
@@ -564,7 +560,7 @@ void nsMenuX::LoadSubMenu(nsIContent* inMenuContent)
 bool nsMenuX::OnOpen()
 {
   nsEventStatus status = nsEventStatus_eIgnore;
-  WidgetMouseEvent event(true, NS_XUL_POPUP_SHOWING, nullptr,
+  WidgetMouseEvent event(true, eXULPopupShowing, nullptr,
                          WidgetMouseEvent::eReal);
   
   nsCOMPtr<nsIContent> popupContent;
@@ -581,7 +577,7 @@ bool nsMenuX::OnOpen()
   // must potentially be updated.
 
   // Get new popup content first since it might have changed as a result of the
-  // NS_XUL_POPUP_SHOWING event above.
+  // eXULPopupShowing event above.
   GetMenuPopupContent(getter_AddRefs(popupContent));
   if (!popupContent)
     return true;
@@ -602,7 +598,7 @@ bool nsMenuX::OnClose()
     return true;
 
   nsEventStatus status = nsEventStatus_eIgnore;
-  WidgetMouseEvent event(true, NS_XUL_POPUP_HIDING, nullptr,
+  WidgetMouseEvent event(true, eXULPopupHiding, nullptr,
                          WidgetMouseEvent::eReal);
 
   nsCOMPtr<nsIContent> popupContent;
@@ -834,7 +830,7 @@ nsresult nsMenuX::SetupIcon()
   if (rollupListener) {
     nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
     if (rollupWidget) {
-      rollupListener->Rollup(0, nullptr, nullptr);
+      rollupListener->Rollup(0, true, nullptr, nullptr);
       [menu cancelTracking];
       return;
     }

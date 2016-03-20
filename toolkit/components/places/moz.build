@@ -14,8 +14,6 @@ XPIDL_SOURCES += [
 XPIDL_MODULE = 'places'
 
 if CONFIG['MOZ_PLACES']:
-    MSVC_ENABLE_PGO = True
-
     XPIDL_SOURCES += [
         'mozIAsyncFavicons.idl',
         'mozIAsyncHistory.idl',
@@ -28,7 +26,6 @@ if CONFIG['MOZ_PLACES']:
         'nsINavBookmarksService.idl',
         'nsITaggingService.idl',
         'nsPIPlacesDatabase.idl',
-        'nsPIPlacesHistoryListenersNotifier.idl',
     ]
 
     EXPORTS.mozilla.places = [
@@ -44,13 +41,13 @@ if CONFIG['MOZ_PLACES']:
         'nsAnnoProtocolHandler.cpp',
         'nsAnnotationService.cpp',
         'nsFaviconService.cpp',
-        'nsMaybeWeakPtr.cpp',
         'nsNavBookmarks.cpp',
         'nsNavHistory.cpp',
         'nsNavHistoryQuery.cpp',
         'nsNavHistoryResult.cpp',
         'nsPlacesModule.cpp',
         'PlaceInfo.cpp',
+        'Shutdown.cpp',
         'SQLFunctions.cpp',
         'VisitInfo.cpp',
     ]
@@ -59,19 +56,19 @@ if CONFIG['MOZ_PLACES']:
         '../build',
     ]
 
-    EXTRA_JS_MODULES = [
+    EXTRA_JS_MODULES += [
         'BookmarkHTMLUtils.jsm',
         'BookmarkJSONUtils.jsm',
+        'Bookmarks.jsm',
         'ClusterLib.js',
         'ColorAnalyzer_worker.js',
         'ColorConversion.js',
+        'History.jsm',
         'PlacesBackups.jsm',
         'PlacesDBUtils.jsm',
+        'PlacesRemoteTabsAutocompleteProvider.jsm',
+        'PlacesSearchAutocompleteProvider.jsm',
         'PlacesTransactions.jsm',
-        'PriorityUrlProvider.jsm'
-    ]
-
-    EXTRA_PP_JS_MODULES += [
         'PlacesUtils.jsm',
     ]
 
@@ -90,6 +87,10 @@ if CONFIG['MOZ_PLACES']:
             'UnifiedComplete.js',
             'UnifiedComplete.manifest',
         ]
+
     FINAL_LIBRARY = 'xul'
 
 include('/ipc/chromium/chromium-config.mozbuild')
+
+with Files('**'):
+    BUG_COMPONENT = ('Toolkit', 'Places')

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -290,23 +291,6 @@ nsCOMArray_base::SetCount(int32_t aNewCount)
   mArray.SetLength(aNewCount);
   return true;
 }
-
-size_t
-nsCOMArray_base::SizeOfExcludingThis(
-    nsBaseArraySizeOfElementIncludingThisFunc aSizeOfElementIncludingThis,
-    mozilla::MallocSizeOf aMallocSizeOf, void* aData) const
-{
-  size_t n = mArray.SizeOfExcludingThis(aMallocSizeOf);
-
-  if (aSizeOfElementIncludingThis) {
-    for (uint32_t index = 0; index < mArray.Length(); ++index) {
-      n += aSizeOfElementIncludingThis(mArray[index], aMallocSizeOf, aData);
-    }
-  }
-
-  return n;
-}
-
 
 void
 nsCOMArray_base::Adopt(nsISupports** aElements, uint32_t aSize)

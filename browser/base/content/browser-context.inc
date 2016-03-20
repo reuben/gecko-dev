@@ -3,6 +3,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+# NB: IF YOU ADD ITEMS TO THIS FILE, PLEASE UPDATE THE WHITELIST IN
+# BrowserUITelemetry.jsm. SEE BUG 991757 FOR DETAILS.
+
       <menugroup id="context-navigation">
         <menuitem id="context-back"
                   class="menuitem-iconic"
@@ -29,7 +32,7 @@
                   command="Browser:Stop"/>
         <menuitem id="context-bookmarkpage"
                   class="menuitem-iconic"
-                  tooltiptext="&bookmarkPageCmd2.label;"
+                  observes="bookmarkThisPageBroadcaster"
                   aria-label="&bookmarkPageCmd2.label;"
                   oncommand="gContextMenu.bookmarkThisPage();"/>
       </menugroup>
@@ -54,7 +57,29 @@
       <menuitem id="context-openlinkintab"
                 label="&openLinkCmdInTab.label;"
                 accesskey="&openLinkCmdInTab.accesskey;"
-                oncommand="gContextMenu.openLinkInTab();"/>
+                usercontextid="0"
+                oncommand="gContextMenu.openLinkInTab(event);"/>
+
+      <menu id="context-openlinkinusercontext-menu"
+            label="&openLinkCmdInContainerTab.label;"
+            accesskey="&openLinkCmdInContainerTab.accesskey;"
+            hidden="true">
+        <menupopup oncommand="gContextMenu.openLinkInTab(event);">
+          <menuitem label="&userContextPersonal.label;"
+                    usercontextid="1"
+                    accesskey="&userContextPersonal.accesskey;"/>
+          <menuitem label="&userContextWork.label;"
+                    usercontextid="2"
+                    accesskey="&userContextWork.accesskey;"/>
+          <menuitem label="&userContextBanking.label;"
+                    usercontextid="3"
+                    accesskey="&userContextBanking.accesskey;"/>
+          <menuitem label="&userContextShopping.label;"
+                    usercontextid="4"
+                    accesskey="&userContextShopping.accesskey;"/>
+        </menupopup>
+      </menu>
+
       <menuitem id="context-openlink"
                 label="&openLinkCmd.label;"
                 accesskey="&openLinkCmd.accesskey;"
@@ -69,8 +94,8 @@
                 accesskey="&bookmarkThisLinkCmd.accesskey;"
                 oncommand="gContextMenu.bookmarkLink();"/>
       <menuitem id="context-sharelink"
-                label="&shareLinkCmd.label;"
-                accesskey="&shareLinkCmd.accesskey;"
+                label="&shareLink.label;"
+                accesskey="&shareLink.accesskey;"
                 oncommand="gContextMenu.shareLink();"/>
       <menuitem id="context-savelink"
                 label="&saveLinkCmd.label;"
@@ -153,7 +178,7 @@
       <menuitem id="context-video-fullscreen"
                 accesskey="&videoFullScreen.accesskey;"
                 label="&videoFullScreen.label;"
-                oncommand="gContextMenu.fullScreenVideo();"/>
+                oncommand="gContextMenu.mediaCommand('fullscreen');"/>
       <menuitem id="context-leave-dom-fullscreen"
                 accesskey="&leaveDOMFullScreen.accesskey;"
                 label="&leaveDOMFullScreen.label;"
@@ -197,8 +222,8 @@
                 accesskey="&saveImageCmd.accesskey;"
                 oncommand="gContextMenu.saveMedia();"/>
       <menuitem id="context-shareimage"
-                label="&shareImageCmd.label;"
-                accesskey="&shareImageCmd.accesskey;"
+                label="&shareImage.label;"
+                accesskey="&shareImage.accesskey;"
                 oncommand="gContextMenu.shareImage();"/>
       <menuitem id="context-sendimage"
                 label="&emailImageCmd.label;"
@@ -222,8 +247,8 @@
                 accesskey="&saveVideoCmd.accesskey;"
                 oncommand="gContextMenu.saveMedia();"/>
       <menuitem id="context-sharevideo"
-                label="&shareVideoCmd.label;"
-                accesskey="&shareVideoCmd.accesskey;"
+                label="&shareVideo.label;"
+                accesskey="&shareVideo.accesskey;"
                 oncommand="gContextMenu.shareVideo();"/>
       <menuitem id="context-saveaudio"
                 label="&saveAudioCmd.label;"
@@ -237,6 +262,11 @@
                 label="&emailVideoCmd.label;"
                 accesskey="&emailVideoCmd.accesskey;"
                 oncommand="gContextMenu.sendMedia();"/>
+      <menu id="context-castvideo"
+                label="&castVideoCmd.label;"
+                accesskey="&castVideoCmd.accesskey;">
+        <menupopup id="context-castvideo-popup" onpopupshowing="gContextMenu.populateCastVideoMenu(this)"/>
+      </menu>
       <menuitem id="context-sendaudio"
                 label="&emailAudioCmd.label;"
                 accesskey="&emailAudioCmd.accesskey;"
@@ -302,9 +332,9 @@
       <menuitem id="context-searchselect"
                 oncommand="BrowserSearch.loadSearchFromContext(this.searchTerms);"/>
       <menuitem id="context-shareselect"
-                label="&shareSelectCmd.label;"
-                accesskey="&shareSelectCmd.accesskey;"
-                oncommand="gContextMenu.shareSelect(getBrowserSelection());"/>
+                label="&shareSelect.label;"
+                accesskey="&shareSelect.accesskey;"
+                oncommand="gContextMenu.shareSelect();"/>
       <menuseparator id="frame-sep"/>
       <menu id="frame" label="&thisFrameMenu.label;" accesskey="&thisFrameMenu.accesskey;">
         <menupopup>
@@ -365,8 +395,8 @@
       <menuitem id="context-viewsource"
                 label="&viewPageSourceCmd.label;"
                 accesskey="&viewPageSourceCmd.accesskey;"
-                oncommand="BrowserViewSourceOfDocument(gContextMenu.browser.contentDocument);"
-                observes="isImage"/>
+                oncommand="BrowserViewSource(gContextMenu.browser);"
+                observes="canViewSource"/>
       <menuitem id="context-viewinfo"
                 label="&viewPageInfoCmd.label;"
                 accesskey="&viewPageInfoCmd.accesskey;"
@@ -376,7 +406,7 @@
                 label="&spellCheckToggle.label;"
                 type="checkbox"
                 accesskey="&spellCheckToggle.accesskey;"
-                oncommand="InlineSpellCheckerUI.toggleEnabled();"/>
+                oncommand="InlineSpellCheckerUI.toggleEnabled(window);"/>
       <menuitem id="spell-add-dictionaries-main"
                 label="&spellAddDictionaries.label;"
                 accesskey="&spellAddDictionaries.accesskey;"
@@ -401,9 +431,39 @@
                 label="&bidiSwitchPageDirectionItem.label;"
                 accesskey="&bidiSwitchPageDirectionItem.accesskey;"
                 oncommand="gContextMenu.switchPageDirection();"/>
+      <menuseparator id="fill-login-separator" hidden="true"/>
+      <menu id="fill-login"
+            label="&fillLoginMenu.label;"
+            label-login="&fillLoginMenu.label;"
+            label-password="&fillPasswordMenu.label;"
+            label-username="&fillUsernameMenu.label;"
+            accesskey="&fillLoginMenu.accesskey;"
+            accesskey-login="&fillLoginMenu.accesskey;"
+            accesskey-password="&fillPasswordMenu.accesskey;"
+            accesskey-username="&fillUsernameMenu.accesskey;"
+            hidden="true">
+        <menupopup id="fill-login-popup">
+          <menuitem id="fill-login-no-logins"
+                    label="&noLoginSuggestions.label;"
+                    disabled="true"
+                    hidden="true"/>
+          <menuseparator id="saved-logins-separator"/>
+          <menuitem id="fill-login-saved-passwords"
+                    label="&viewSavedLogins.label;"
+                    oncommand="gContextMenu.openPasswordManager();"/>
+        </menupopup>
+      </menu>
       <menuseparator id="inspect-separator" hidden="true"/>
       <menuitem id="context-inspect"
                 hidden="true"
                 label="&inspectContextMenu.label;"
                 accesskey="&inspectContextMenu.accesskey;"
                 oncommand="gContextMenu.inspectNode();"/>
+      <menuseparator id="context-media-eme-separator" hidden="true"/>
+      <menuitem id="context-media-eme-learnmore"
+                class="menuitem-iconic"
+                hidden="true"
+                label="&emeLearnMoreContextMenu.label;"
+                accesskey="&emeLearnMoreContextMenu.accesskey;"
+                oncommand="gContextMenu.drmLearnMore(event);"
+                onclick="checkForMiddleClick(this, event);"/>

@@ -19,7 +19,7 @@ const unsigned char* base =
                   "abcdefghijklmnopqrstuvwxyz"
                   "0123456789+/";
 
-template <typename T>
+template<typename T>
 static void
 Encode3to4(const unsigned char* aSrc, T* aDest)
 {
@@ -37,7 +37,7 @@ Encode3to4(const unsigned char* aSrc, T* aDest)
   }
 }
 
-template <typename T>
+template<typename T>
 static void
 Encode2to4(const unsigned char* aSrc, T* aDest)
 {
@@ -47,7 +47,7 @@ Encode2to4(const unsigned char* aSrc, T* aDest)
   aDest[3] = (unsigned char)'=';
 }
 
-template <typename T>
+template<typename T>
 static void
 Encode1to4(const unsigned char* aSrc, T* aDest)
 {
@@ -57,7 +57,7 @@ Encode1to4(const unsigned char* aSrc, T* aDest)
   aDest[3] = (unsigned char)'=';
 }
 
-template <typename T>
+template<typename T>
 static void
 Encode(const unsigned char* aSrc, uint32_t aSrcLen, T* aDest)
 {
@@ -84,7 +84,7 @@ Encode(const unsigned char* aSrc, uint32_t aSrcLen, T* aDest)
 
 // END base64 encode code copied and modified from NSPR.
 
-template <typename T>
+template<typename T>
 struct EncodeInputStream_State
 {
   unsigned char c[3];
@@ -92,7 +92,7 @@ struct EncodeInputStream_State
   typename T::char_type* buffer;
 };
 
-template <typename T>
+template<typename T>
 NS_METHOD
 EncodeInputStream_Encoder(nsIInputStream* aStream,
                           void* aClosure,
@@ -131,8 +131,8 @@ EncodeInputStream_Encoder(nsIInputStream* aStream,
 
   // Encode the bulk of the
   uint32_t encodeLength = countRemaining - countRemaining % 3;
-  NS_ABORT_IF_FALSE(encodeLength % 3 == 0,
-                    "Should have an exact number of triplets!");
+  MOZ_ASSERT(encodeLength % 3 == 0,
+             "Should have an exact number of triplets!");
   Encode(src, encodeLength, state->buffer);
   state->buffer += (encodeLength / 3) * 4;
   src += encodeLength;
@@ -143,7 +143,7 @@ EncodeInputStream_Encoder(nsIInputStream* aStream,
 
   if (countRemaining) {
     // We should never have a full triplet left at this point.
-    NS_ABORT_IF_FALSE(countRemaining < 3, "We should have encoded more!");
+    MOZ_ASSERT(countRemaining < 3, "We should have encoded more!");
     state->c[0] = src[0];
     state->c[1] = (countRemaining == 2) ? src[1] : '\0';
     state->charsOnStack = countRemaining;
@@ -152,7 +152,7 @@ EncodeInputStream_Encoder(nsIInputStream* aStream,
   return NS_OK;
 }
 
-template <typename T>
+template<typename T>
 nsresult
 EncodeInputStream(nsIInputStream* aInputStream,
                   T& aDest,
@@ -180,8 +180,7 @@ EncodeInputStream(nsIInputStream* aInputStream,
 
   uint32_t count = uint32_t(countlong);
 
-  aDest.SetLength(count + aOffset);
-  if (aDest.Length() != count + aOffset) {
+  if (!aDest.SetLength(count + aOffset, mozilla::fallible)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -226,7 +225,10 @@ EncodeInputStream(nsIInputStream* aInputStream,
   return NS_OK;
 }
 
-} // namespace (anonymous)
+static const char kBase64URLAlphabet[] =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+} // namespace
 
 namespace mozilla {
 
@@ -267,7 +269,7 @@ Base64Encode(const nsACString& aBinaryData, nsACString& aString)
   char* buffer;
 
   // Add one byte for null termination.
-  if (aString.SetCapacity(stringLen + 1, fallible_t()) &&
+  if (aString.SetCapacity(stringLen + 1, fallible) &&
       (buffer = aString.BeginWriting()) &&
       PL_Base64Encode(aBinaryData.BeginReading(), aBinaryData.Length(), buffer)) {
     // PL_Base64Encode doesn't null terminate the buffer for us when we pass
@@ -317,7 +319,7 @@ Base64Decode(const nsACString& aString, nsACString& aBinaryData)
   char* buffer;
 
   // Add one byte for null termination.
-  if (aBinaryData.SetCapacity(binaryDataLen + 1, fallible_t()) &&
+  if (aBinaryData.SetCapacity(binaryDataLen + 1, fallible) &&
       (buffer = aBinaryData.BeginWriting()) &&
       PL_Base64Decode(aString.BeginReading(), aString.Length(), buffer)) {
     // PL_Base64Decode doesn't null terminate the buffer for us when we pass
@@ -354,6 +356,51 @@ Base64Decode(const nsAString& aBinaryData, nsAString& aString)
   }
 
   return rv;
+}
+
+nsresult
+Base64URLEncode(uint32_t aLength, const uint8_t* aData, nsACString& aString)
+{
+  // Don't encode empty strings.
+  if (aLength == 0) {
+    aString.Truncate();
+    return NS_OK;
+  }
+
+  // Check for overflow.
+  if ((static_cast<uint64_t>(aLength) * 6 + 7) / 8 > UINT32_MAX) {
+    return NS_ERROR_FAILURE;
+  }
+
+  if (!aString.SetLength((aLength * 8 + 5) / 6, fallible)) {
+    aString.Truncate();
+    return NS_ERROR_FAILURE;
+  }
+
+  char* rawBuffer = aString.BeginWriting();
+
+  uint32_t index = 0;
+  for (; index + 3 <= aLength; index += 3) {
+    *rawBuffer++ = kBase64URLAlphabet[aData[index] >> 2];
+    *rawBuffer++ = kBase64URLAlphabet[((aData[index] & 0x3) << 4) |
+                                      (aData[index + 1] >> 4)];
+    *rawBuffer++ = kBase64URLAlphabet[((aData[index + 1] & 0xf) << 2) |
+                                      (aData[index + 2] >> 6)];
+    *rawBuffer++ = kBase64URLAlphabet[aData[index + 2] & 0x3f];
+  }
+
+  uint32_t remaining = aLength - index;
+  if (remaining == 1) {
+    *rawBuffer++ = kBase64URLAlphabet[aData[index] >> 2];
+    *rawBuffer++ = kBase64URLAlphabet[((aData[index] & 0x3) << 4)];
+  } else if (remaining == 2) {
+    *rawBuffer++ = kBase64URLAlphabet[aData[index] >> 2];
+    *rawBuffer++ = kBase64URLAlphabet[((aData[index] & 0x3) << 4) |
+                                      (aData[index + 1] >> 4)];
+    *rawBuffer++ = kBase64URLAlphabet[((aData[index + 1] & 0xf) << 2)];
+  }
+
+  return NS_OK;
 }
 
 } // namespace mozilla

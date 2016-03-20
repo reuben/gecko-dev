@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,13 +15,13 @@
 
 #include "nscore.h"
 #include "nsClassHashtable.h"
-#include "nsAutoPtr.h"
+#include "mozilla/UniquePtr.h"
 
 #include <stdio.h>
 
 class nsIFile;
 
-class NS_COM_GLUE nsINIParser
+class nsINIParser
 {
 public:
   nsINIParser() {}
@@ -105,22 +106,13 @@ private:
 
     const char* key;
     const char* value;
-    nsAutoPtr<INIValue> next;
-  };
-
-  struct GSClosureStruct
-  {
-    INISectionCallback usercb;
-    void* userclosure;
+    mozilla::UniquePtr<INIValue> next;
   };
 
   nsClassHashtable<nsDepCharHashKey, INIValue> mSections;
-  nsAutoArrayPtr<char> mFileContents;
+  mozilla::UniquePtr<char[]> mFileContents;
 
   nsresult InitFromFILE(FILE* aFd);
-
-  static PLDHashOperator GetSectionsCB(const char* aKey,
-                                       INIValue* aData, void* aClosure);
 };
 
 #endif /* nsINIParser_h__ */

@@ -6,9 +6,9 @@ MARIONETTE_TIMEOUT = 60000;
 SpecialPowers.addPermission("sms", true, document);
 SpecialPowers.setBoolPref("dom.sms.enabled", true);
 
-let manager = window.navigator.mozMobileMessage;
-let numberMsgs = 10;
-let smsList = new Array();
+var manager = window.navigator.mozMobileMessage;
+var numberMsgs = 10;
+var smsList = new Array();
 
 function verifyInitialState() {
   log("Verifying initial state.");
@@ -20,9 +20,8 @@ function verifyInitialState() {
 
 function deleteAllMsgs(nextFunction) {
   let msgList = new Array();
-  let filter = new MozSmsFilter;
 
-  let cursor = manager.getMessages(filter, false);
+  let cursor = manager.getMessages();
   ok(cursor instanceof DOMCursor,
       "cursor is instanceof " + cursor.constructor);
 
@@ -171,11 +170,10 @@ manager.onreceived = function onreceived(event) {
 };
 
 function getMsgs() {
-  var filter = new MozSmsFilter();
   let foundSmsList = new Array();
 
   // Set filter for sent messages
-  filter.delivery = "sent";
+  let filter = { delivery: "sent" };
 
   log("Getting the sent SMS messages.");
   let cursor = manager.getMessages(filter, false);

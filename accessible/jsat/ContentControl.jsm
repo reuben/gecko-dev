@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let Ci = Components.interfaces;
-let Cu = Components.utils;
+var Ci = Components.interfaces;
+var Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, 'Services',
@@ -15,7 +15,9 @@ XPCOMUtils.defineLazyModuleGetter(this, 'Logger',
 XPCOMUtils.defineLazyModuleGetter(this, 'Roles',
   'resource://gre/modules/accessibility/Constants.jsm');
 XPCOMUtils.defineLazyModuleGetter(this, 'TraversalRules',
-  'resource://gre/modules/accessibility/TraversalRules.jsm');
+  'resource://gre/modules/accessibility/Traversal.jsm');
+XPCOMUtils.defineLazyModuleGetter(this, 'TraversalHelper',
+  'resource://gre/modules/accessibility/Traversal.jsm');
 XPCOMUtils.defineLazyModuleGetter(this, 'Presentation',
   'resource://gre/modules/accessibility/Presentation.jsm');
 
@@ -27,7 +29,6 @@ const MOVEMENT_GRANULARITY_PARAGRAPH = 8;
 
 this.ContentControl = function ContentControl(aContentScope) {
   this._contentScope = Cu.getWeakReference(aContentScope);
-  this._vcCache = new WeakMap();
   this._childMessageSenders = new WeakMap();
 };
 
@@ -38,7 +39,8 @@ this.ContentControl.prototype = {
                        'AccessFu:AutoMove',
                        'AccessFu:Activate',
                        'AccessFu:MoveCaret',
-                       'AccessFu:MoveByGranularity'],
+                       'AccessFu:MoveByGranularity',
+                       'AccessFu:AndroidScroll'],
 
   start: function cc_start() {
     let cs = this._contentScope.get();
@@ -91,9 +93,31 @@ this.ContentControl.prototype = {
     }
   },
 
+  handleAndroidScroll: function cc_handleAndroidScroll(aMessage) {
+    let vc = this.vc;
+    let position = vc.position;
+
+    if (aMessage.json.origin != 'child' && this.sendToChild(vc, aMessage)) {
+      // Forwarded succesfully to child cursor.
+      return;
+    }
+
+    // Counter-intuitive, but scrolling backward (ie. up), actually should
+    // increase range values.
+    if (this.adjustRange(position, aMessage.json.direction === 'backward')) {
+      return;
+    }
+
+    this._contentScope.get().sendAsyncMessage('AccessFu:DoScroll',
+      { bounds: Utils.getBounds(position, true),
+        page: aMessage.json.direction === 'forward' ? 1 : -1,
+        horizontal: false });
+  },
+
   handleMoveCursor: function cc_handleMoveCursor(aMessage) {
     let origin = aMessage.json.origin;
     let action = aMessage.json.action;
+    let adjustRange = aMessage.json.adjustRange;
     let vc = this.vc;
 
     if (origin != 'child' && this.sendToChild(vc, aMessage)) {
@@ -101,7 +125,11 @@ this.ContentControl.prototype = {
       return;
     }
 
-    let moved = vc[action](TraversalRules[aMessage.json.rule]);
+    if (adjustRange && this.adjustRange(vc.position, action === 'moveNext')) {
+      return;
+    }
+
+    let moved = TraversalHelper.move(vc, action, aMessage.json.rule);
 
     if (moved) {
       if (origin === 'child') {
@@ -120,12 +148,16 @@ this.ContentControl.prototype = {
 
         // Attempt to forward move to a potential child cursor in our
         // new position.
-        this.sendToChild(vc, aMessage, { action: childAction});
+        this.sendToChild(vc, aMessage, { action: childAction }, true);
       }
-    } else if (!this._childMessageSenders.has(aMessage.target)) {
-      // We failed to move, and the message is not from a child, so forward
-      // to parent.
+    } else if (!this._childMessageSenders.has(aMessage.target) &&
+               origin !== 'top') {
+      // We failed to move, and the message is not from a parent, so forward
+      // to it.
       this.sendToParent(aMessage);
+    } else {
+      this._contentScope.get().sendAsyncMessage('AccessFu:Present',
+        Presentation.noMove(action));
     }
   },
 
@@ -136,6 +168,8 @@ this.ContentControl.prototype = {
     }
     if (!Utils.getMessageManager(aEvent.target)) {
       aEvent.preventDefault();
+    } else {
+      aEvent.target.focus();
     }
   },
 
@@ -153,6 +187,7 @@ this.ContentControl.prototype = {
     if (!forwarded) {
       this._contentScope.get().sendAsyncMessage('AccessFu:CursorCleared');
     }
+    this.document.activeElement.blur();
   },
 
   handleAutoMove: function cc_handleAutoMove(aMessage) {
@@ -166,7 +201,7 @@ this.ContentControl.prototype = {
       });
       try {
         if (aMessage.json.activateIfKey &&
-          aAccessible.role != Roles.KEY) {
+          !Utils.isActivatableOnFingerUp(aAccessible)) {
           // Only activate keys, don't do anything on other objects.
           return;
         }
@@ -207,7 +242,7 @@ this.ContentControl.prototype = {
         }
       }
 
-      if (aAccessible.role !== Roles.KEY) {
+      if (!Utils.isActivatableOnFingerUp(aAccessible)) {
         // Keys will typically have a sound of their own.
         this._contentScope.get().sendAsyncMessage('AccessFu:Present',
           Presentation.actionInvoked(aAccessible, 'click'));
@@ -248,10 +283,40 @@ this.ContentControl.prototype = {
     };
 
     let vc = this.vc;
-    if (!this.sendToChild(vc, aMessage)) {
+    if (!this.sendToChild(vc, aMessage, null, true)) {
       let position = vc.position;
       activateAccessible(getActivatableDescendant(position) || position);
     }
+  },
+
+  adjustRange: function cc_adjustRange(aAccessible, aStepUp) {
+    let acc = Utils.getEmbeddedControl(aAccessible) || aAccessible;
+    try {
+      acc.QueryInterface(Ci.nsIAccessibleValue);
+    } catch (x) {
+      // This is not an adjustable, return false.
+      return false;
+    }
+
+    let elem = acc.DOMNode;
+    if (!elem) {
+      return false;
+    }
+
+    if (elem.tagName === 'INPUT' && elem.type === 'range') {
+      elem[aStepUp ? 'stepDown' : 'stepUp']();
+      let evt = this.document.createEvent('UIEvent');
+      evt.initEvent('change', true, true);
+      elem.dispatchEvent(evt);
+    } else {
+      let evt = this.document.createEvent('KeyboardEvent');
+      let keycode = aStepUp ? evt.DOM_VK_DOWN : evt.DOM_VK_UP;
+      evt.initKeyEvent(
+        "keypress", false, true, null, false, false, false, false, keycode, 0);
+      elem.dispatchEvent(evt);
+    }
+
+    return true;
   },
 
   handleMoveByGranularity: function cc_handleMoveByGranularity(aMessage) {
@@ -347,10 +412,16 @@ this.ContentControl.prototype = {
     return null;
   },
 
-  sendToChild: function cc_sendToChild(aVirtualCursor, aMessage, aReplacer) {
-    let mm = this.getChildCursor(aVirtualCursor.position);
+  sendToChild: function cc_sendToChild(aVirtualCursor, aMessage, aReplacer,
+                                       aFocus) {
+    let position = aVirtualCursor.position;
+    let mm = this.getChildCursor(position);
     if (!mm) {
       return false;
+    }
+
+    if (aFocus) {
+      position.takeFocus();
     }
 
     // XXX: This is a silly way to make a deep copy
@@ -396,7 +467,7 @@ this.ContentControl.prototype = {
           this._contentScope.get().sendAsyncMessage(
             'AccessFu:Present', Presentation.pivotChanged(
               vc.position, null, Ci.nsIAccessiblePivot.REASON_NONE,
-              vc.startOffset, vc.endOffset));
+              vc.startOffset, vc.endOffset, false));
         }
       };
 
@@ -416,17 +487,23 @@ this.ContentControl.prototype = {
       let moveFirstOrLast = moveMethod in ['moveFirst', 'moveLast'];
       if (!moveFirstOrLast || acc) {
         // We either need next/previous or there is an anchor we need to use.
-        moved = vc[moveFirstOrLast ? 'moveNext' : moveMethod](rule, acc, true);
+        moved = vc[moveFirstOrLast ? 'moveNext' : moveMethod](rule, acc, true,
+                                                              false);
       }
       if (moveFirstOrLast && !moved) {
         // We move to first/last after no anchor move happened or succeeded.
-        moved = vc[moveMethod](rule);
+        moved = vc[moveMethod](rule, false);
       }
 
       let sentToChild = this.sendToChild(vc, {
         name: 'AccessFu:AutoMove',
-        json: aOptions
-      });
+        json: {
+          moveMethod: aOptions.moveMethod,
+          moveToFocused: aOptions.moveToFocused,
+          noOpIfOnScreen: true,
+          forcePresent: true
+        }
+      }, null, true);
 
       if (!moved && !sentToChild) {
         forcePresentFunc();

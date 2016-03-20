@@ -9,6 +9,57 @@
 #include "Types.h"
 
 namespace mozilla {
+
+/**
+ * Sides represents a set of physical sides.
+ */
+struct Sides final {
+  Sides() : mBits(0) {}
+  explicit Sides(SideBits aSideBits)
+  {
+    MOZ_ASSERT((aSideBits & ~eSideBitsAll) == 0, "illegal side bits");
+    mBits = aSideBits;
+  }
+  bool IsEmpty() const { return mBits == 0; }
+  bool Top()     const { return (mBits & eSideBitsTop) != 0; }
+  bool Right()   const { return (mBits & eSideBitsRight) != 0; }
+  bool Bottom()  const { return (mBits & eSideBitsBottom) != 0; }
+  bool Left()    const { return (mBits & eSideBitsLeft) != 0; }
+  bool Contains(SideBits aSideBits) const
+  {
+    MOZ_ASSERT((aSideBits & ~eSideBitsAll) == 0, "illegal side bits");
+    return (mBits & aSideBits) == aSideBits;
+  }
+  Sides operator|(Sides aOther) const
+  {
+    return Sides(SideBits(mBits | aOther.mBits));
+  }
+  Sides operator|(SideBits aSideBits) const
+  {
+    return *this | Sides(aSideBits);
+  }
+  Sides& operator|=(Sides aOther)
+  {
+    mBits |= aOther.mBits;
+    return *this;
+  }
+  Sides& operator|=(SideBits aSideBits)
+  {
+    return *this |= Sides(aSideBits);
+  }
+  bool operator==(Sides aOther) const
+  {
+    return mBits == aOther.mBits;
+  }
+  bool operator!=(Sides aOther) const
+  {
+    return !(*this == aOther);
+  }
+
+private:
+  uint8_t mBits;
+};
+
 namespace gfx {
 
 /**
@@ -17,7 +68,7 @@ namespace gfx {
  */
 template <class T, class Sub>
 struct BaseMargin {
-  typedef mozilla::css::Side SideT;
+  typedef mozilla::Side SideT; // because we have a method named Side
 
   // Do not change the layout of these members; the Side() methods below
   // depend on this order.
@@ -38,25 +89,25 @@ struct BaseMargin {
 
   T& Side(SideT aSide) {
     // This is ugly!
-    return *(&top + T(aSide));
+    return *(&top + int(aSide));
   }
   T Side(SideT aSide) const {
     // This is ugly!
-    return *(&top + T(aSide));
+    return *(&top + int(aSide));
   }
 
-  void ApplySkipSides(int aSkipSides)
+  void ApplySkipSides(Sides aSkipSides)
   {
-    if (aSkipSides & (1 << mozilla::css::eSideTop)) {
+    if (aSkipSides.Top()) {
       top = 0;
     }
-    if (aSkipSides & (1 << mozilla::css::eSideRight)) {
+    if (aSkipSides.Right()) {
       right = 0;
     }
-    if (aSkipSides & (1 << mozilla::css::eSideBottom)) {
+    if (aSkipSides.Bottom()) {
       bottom = 0;
     }
-    if (aSkipSides & (1 << mozilla::css::eSideLeft)) {
+    if (aSkipSides.Left()) {
       left = 0;
     }
   }
@@ -87,7 +138,7 @@ struct BaseMargin {
   }
 };
 
-}
-}
+} // namespace gfx
+} // namespace mozilla
 
 #endif /* MOZILLA_GFX_BASEMARGIN_H_ */

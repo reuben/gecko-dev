@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -33,7 +34,7 @@ do_GetService(const char* aContractID, nsresult* aError)
   return nsGetServiceByContractIDWithError(aContractID, aError);
 }
 
-class nsGetServiceFromCategory : public nsCOMPtr_helper
+class MOZ_STACK_CLASS nsGetServiceFromCategory final : public nsCOMPtr_helper
 {
 public:
   nsGetServiceFromCategory(const char* aCategory, const char* aEntry,
@@ -44,7 +45,8 @@ public:
   {
   }
 
-  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const;
+  virtual nsresult NS_FASTCALL operator()(const nsIID&, void**) const
+    override;
 protected:
   const char*                 mCategory;
   const char*                 mEntry;
@@ -58,11 +60,10 @@ do_GetServiceFromCategory(const char* aCategory, const char* aEntry,
   return nsGetServiceFromCategory(aCategory, aEntry, aError);
 }
 
-NS_COM_GLUE nsresult CallGetService(const nsCID& aClass, const nsIID& aIID,
-                                    void** aResult);
+nsresult CallGetService(const nsCID& aClass, const nsIID& aIID, void** aResult);
 
-NS_COM_GLUE nsresult CallGetService(const char* aContractID, const nsIID& aIID,
-                                    void** aResult);
+nsresult CallGetService(const char* aContractID, const nsIID& aIID,
+                        void** aResult);
 
 // type-safe shortcuts for calling |GetService|
 template<class DestinationType>

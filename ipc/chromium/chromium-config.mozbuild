@@ -5,21 +5,21 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 LOCAL_INCLUDES += [
+    '!/ipc/ipdl/_ipdlheaders',
     '/ipc/chromium/src',
     '/ipc/glue',
 ]
 
-GENERATED_INCLUDES += [
-    '/ipc/ipdl/_ipdlheaders',
-]
-
 if CONFIG['OS_ARCH'] == 'WINNT':
-    OS_LIBS += [ '$(call EXPAND_LIBNAME,psapi shell32 dbghelp)' ]
+    OS_LIBS += [
+        'psapi',
+        'shell32',
+        'dbghelp',
+    ]
 
     DEFINES.update({
         'UNICODE': True,
         '_UNICODE': True,
-        'NOMINMAX': True,
         '_CRT_RAND_S': True,
         'CERT_CHAIN_PARA_HAS_EXTRA_FIELDS': True,
         '_SECURE_ATL': True,

@@ -22,4 +22,7 @@ LOCAL_INCLUDES += [
     '/js/xpconnect/loader',
 ]
 
-FINAL_LIBRARY = 'toolkitcomps'
+FINAL_LIBRARY = 'xul'
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wshadow']

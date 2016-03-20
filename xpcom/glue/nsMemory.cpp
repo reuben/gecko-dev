@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,7 +15,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 // nsMemory static helper routines
 
-NS_COM_GLUE nsresult
+nsresult
 nsMemory::HeapMinimize(bool aImmediate)
 {
   nsCOMPtr<nsIMemory> mem;
@@ -26,7 +27,7 @@ nsMemory::HeapMinimize(bool aImmediate)
   return mem->HeapMinimize(aImmediate);
 }
 
-NS_COM_GLUE void*
+void*
 nsMemory::Clone(const void* aPtr, size_t aSize)
 {
   void* newPtr = NS_Alloc(aSize);
@@ -36,7 +37,7 @@ nsMemory::Clone(const void* aPtr, size_t aSize)
   return newPtr;
 }
 
-NS_COM_GLUE nsIMemory*
+nsIMemory*
 nsMemory::GetGlobalMemoryService()
 {
   nsIMemory* mem;

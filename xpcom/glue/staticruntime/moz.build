@@ -14,19 +14,21 @@ UNIFIED_SOURCES += [
     '../nsStringAPI.cpp',
 ]
 
-LIBRARY_NAME = 'xpcomglue_staticruntime_s'
+Library('xpcomglue_staticruntime_s')
 
-SDK_LIBRARY = [
-    "%s%s.%s" % (CONFIG['LIB_PREFIX'], 'xpcomglue_staticruntime_s', CONFIG['LIB_SUFFIX']),
-]
+SDK_LIBRARY = True
 
 FORCE_STATIC_LIB = True
 
 if CONFIG['_MSC_VER']:
     DEFINES['_USE_ANSI_CPP'] = True
+    # Don't include directives about which CRT to use
+    CFLAGS += ['-Zl']
+    CXXFLAGS += ['-Zl']
 
 LOCAL_INCLUDES += [
     '../../build',
+    '../../threads',
 ]
 
 # Statically link to the CRT on Windows
@@ -34,3 +36,16 @@ USE_STATIC_LIBS = True
 
 # Don't use STL wrappers here (i.e. wrapped <new>); they require mozalloc
 DISABLE_STL_WRAPPING = True
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wshadow']
+
+# Include fallible for third party code using the xpcom glue
+USE_LIBS += [
+    'fallible',
+]
+
+# Force to build a static library only
+NO_EXPAND_LIBS = True
+
+DIST_INSTALL = True

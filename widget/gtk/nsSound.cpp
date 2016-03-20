@@ -16,6 +16,7 @@
 #include "nsIURL.h"
 #include "nsIFileURL.h"
 #include "nsNetUtil.h"
+#include "nsIChannel.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsString.h"
@@ -23,8 +24,10 @@
 #include "nsDirectoryServiceDefs.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/Services.h"
+#include "mozilla/unused.h"
 #include "nsIStringBundle.h"
 #include "nsIXULAppInfo.h"
+#include "nsContentUtils.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -69,7 +72,7 @@ static ca_proplist_sets_fn ca_proplist_sets;
 static ca_context_play_full_fn ca_context_play_full;
 
 struct ScopedCanberraFile {
-    ScopedCanberraFile(nsIFile *file): mFile(file) {};
+    explicit ScopedCanberraFile(nsIFile *file): mFile(file) {};
 
     ~ScopedCanberraFile() {
         if (mFile) {
@@ -78,7 +81,7 @@ struct ScopedCanberraFile {
     }
 
     void forget() {
-        mFile.forget();
+        mozilla::Unused << mFile.forget();
     }
     nsIFile* operator->() { return mFile; }
     operator nsIFile*() { return mFile; }
@@ -345,7 +348,12 @@ NS_METHOD nsSound::Play(nsIURL *aURL)
         g_free(path);
     } else {
         nsCOMPtr<nsIStreamLoader> loader;
-        rv = NS_NewStreamLoader(getter_AddRefs(loader), aURL, this);
+        rv = NS_NewStreamLoader(getter_AddRefs(loader),
+                                aURL,
+                                this, // aObserver
+                                nsContentUtils::GetSystemPrincipal(),
+                                nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                                nsIContentPolicy::TYPE_OTHER);
     }
 
     return rv;

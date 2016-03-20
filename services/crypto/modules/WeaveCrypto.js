@@ -4,13 +4,12 @@
 
 this.EXPORTED_SYMBOLS = ["WeaveCrypto"];
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cr = Components.results;
+var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/ctypes.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/ctypes.jsm");
+Cu.import('resource://gre/modules/AppConstants.jsm');
 
 /**
  * Shortcuts for some algorithm SEC OIDs.  Full list available here:
@@ -132,15 +131,14 @@ WeaveCrypto.prototype = {
 
         // XXX really want to be able to pass specific dlopen flags here.
         var nsslib;
-        try {
+        if (AppConstants.MOZ_SYSTEM_NSS) {
+            // Search platform-dependent library paths for system NSS.
             this.log("Trying NSS library without path");
             nsslib = ctypes.open(path);
-        } catch(e) {
-            // In case opening the library without a full path fails,
-            // try again with a full path.
-            let file = Services.dirsvc.get("GreD", Ci.nsILocalFile);
+        } else {
+            let file = Services.dirsvc.get("GreBinD", Ci.nsILocalFile);
             file.append(path);
-            this.log("Trying again with path " + file.path);
+            this.log("Trying NSS library with path " + file.path);
             nsslib = ctypes.open(file.path);
         }
 
@@ -539,7 +537,9 @@ WeaveCrypto.prototype = {
         }
     },
 
-    generateRandomIV : function() this.generateRandomBytes(this.ivLength),
+    generateRandomIV : function() {
+      return this.generateRandomBytes(this.ivLength);
+    },
 
     generateRandomBytes : function(byteCount) {
         this.log("generateRandomBytes() called");
@@ -709,7 +709,7 @@ WeaveCrypto.prototype = {
         // Callee picks if SEC_OID_UNKNOWN, but only SHA1 is supported.
         let prfAlg    = this.nss.SEC_OID_HMAC_SHA1;
 
-        let keyLength  = keyLength || 0;    // 0 = Callee will pick.
+        keyLength  = keyLength || 0;    // 0 = Callee will pick.
         let iterations = KEY_DERIVATION_ITERATIONS;
 
         let algid, slot, symKey, keyData;

@@ -9,15 +9,19 @@
 #include "nsIURI.h"
 #include "nsXULAppAPI.h"
 #include "jsapi.h"
-#include "nsCxPusher.h"
 #include "nsServiceManagerUtils.h"
 #include "nsLiteralString.h"
 #include "nsThreadUtils.h"
 #include "nsIIOService.h"
 #include "nsNetUtil.h"
+#include "nsIAddonPolicyService.h"
+#include "nsIFileURL.h"
 #include "nsIResProtocolHandler.h"
 #include "nsIChromeRegistry.h"
 #include "nsIJARURI.h"
+#include "nsJSUtils.h"
+#include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/ToJSValue.h"
 #include "mozilla/AddonPathService.h"
 #include "mozilla/Omnijar.h"
 
@@ -63,6 +67,18 @@ AddonPathService::GetInstance()
   return sInstance;
 }
 
+static JSAddonId*
+ConvertAddonId(const nsAString& addonIdString)
+{
+  AutoSafeJSContext cx;
+  JS::RootedValue strv(cx);
+  if (!mozilla::dom::ToJSValue(cx, addonIdString, &strv)) {
+    return nullptr;
+  }
+  JS::RootedString str(cx, strv.toString());
+  return JS::NewAddonId(cx, str);
+}
+
 JSAddonId*
 AddonPathService::Find(const nsAString& path)
 {
@@ -85,7 +101,8 @@ NS_IMETHODIMP
 AddonPathService::FindAddonId(const nsAString& path, nsAString& addonIdString)
 {
   if (JSAddonId* id = Find(path)) {
-    addonIdString = JS::CharsZOfAddonId(id);
+    JSFlatString* flat = JS_ASSERT_STRING_IS_FLAT(JS::StringOfAddonId(id));
+    AssignJSFlatString(addonIdString, flat);
   }
   return NS_OK;
 }
@@ -104,11 +121,7 @@ AddonPathService::FindAddonId(const nsAString& path)
 NS_IMETHODIMP
 AddonPathService::InsertPath(const nsAString& path, const nsAString& addonIdString)
 {
-  AutoSafeJSContext cx;
-  JS::RootedString str(cx, JS_NewUCStringCopyN(cx,
-                                               addonIdString.BeginReading(),
-                                               addonIdString.Length()));
-  JSAddonId* addonId = JS::NewAddonId(cx, str);
+  JSAddonId* addonId = ConvertAddonId(addonIdString);
 
   // Add the new path in sorted order.
   PathEntryComparator comparator;
@@ -191,12 +204,26 @@ ResolveURI(nsIURI* aURI, nsAString& out)
 JSAddonId*
 MapURIToAddonID(nsIURI* aURI)
 {
-  if (!NS_IsMainThread() || XRE_GetProcessType() != GeckoProcessType_Default) {
+  if (!NS_IsMainThread() || !XRE_IsParentProcess()) {
     return nullptr;
   }
 
+  bool equals;
+  nsresult rv;
+  if (NS_SUCCEEDED(aURI->SchemeIs("moz-extension", &equals)) && equals) {
+    nsCOMPtr<nsIAddonPolicyService> service = do_GetService("@mozilla.org/addons/policy-service;1");
+    if (service) {
+      nsString addonId;
+      rv = service->ExtensionURIToAddonId(aURI, addonId);
+      if (NS_FAILED(rv))
+        return nullptr;
+
+      return ConvertAddonId(addonId);
+    }
+  }
+
   nsAutoString filePath;
-  nsresult rv = ResolveURI(aURI, filePath);
+  rv = ResolveURI(aURI, filePath);
   if (NS_FAILED(rv))
     return nullptr;
 
@@ -218,4 +245,4 @@ MapURIToAddonID(nsIURI* aURI)
   return AddonPathService::FindAddonId(filePath);
 }
 
-}
+} // namespace mozilla

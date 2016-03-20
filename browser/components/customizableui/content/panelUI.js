@@ -10,13 +10,18 @@ XPCOMUtils.defineLazyModuleGetter(this, "Promise",
                                   "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ShortcutUtils",
                                   "resource://gre/modules/ShortcutUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
+                                  "resource://gre/modules/AppConstants.jsm");
+
 /**
  * Maintains the state and dispatches events for the main menu panel.
  */
 
 const PanelUI = {
   /** Panel events that we listen for. **/
-  get kEvents() ["popupshowing", "popupshown", "popuphiding", "popuphidden"],
+  get kEvents() {
+    return ["popupshowing", "popupshown", "popuphiding", "popuphidden"];
+  },
   /**
    * Used for lazily getting and memoizing elements from the document. Lazy
    * getters are set in init, and memoizing happens after the first retrieval.
@@ -152,10 +157,6 @@ const PanelUI = {
 
       this.panel.addEventListener("popupshown", function onPopupShown() {
         this.removeEventListener("popupshown", onPopupShown);
-        // As an optimization for the customize mode transition, we preload
-        // about:customizing in the background once the menu panel is first
-        // shown.
-        gCustomizationTabPreloader.ensurePreloading();
         deferred.resolve();
       });
 
@@ -163,6 +164,8 @@ const PanelUI = {
         document.getAnonymousElementByAttribute(anchor, "class",
                                                 "toolbarbutton-icon");
       this.panel.openPopup(iconAnchor || anchor);
+    }, (reason) => {
+      console.error("Error showing the PanelUI menu", reason);
     });
 
     return deferred.promise;
@@ -180,6 +183,11 @@ const PanelUI = {
   },
 
   handleEvent: function(aEvent) {
+    // Ignore context menus and menu button menus showing and hiding:
+    if (aEvent.type.startsWith("popup") &&
+        aEvent.target != this.panel) {
+      return;
+    }
     switch (aEvent.type) {
       case "popupshowing":
         this._adjustLabelsForAutoHyphens();
@@ -221,7 +229,7 @@ const PanelUI = {
     if (this._readyPromise) {
       return this._readyPromise;
     }
-    this._readyPromise = Task.spawn(function() {
+    this._readyPromise = Task.spawn(function*() {
       if (!this._initialized) {
         let delayedStartupDeferred = Promise.defer();
         let delayedStartupObserver = (aSubject, aTopic, aData) => {
@@ -322,6 +330,7 @@ const PanelUI = {
       evt.initCustomEvent("ViewShowing", true, true, viewNode);
       viewNode.dispatchEvent(evt);
       if (evt.defaultPrevented) {
+        aAnchor.open = false;
         return;
       }
 
@@ -329,6 +338,7 @@ const PanelUI = {
       tempPanel.setAttribute("type", "arrow");
       tempPanel.setAttribute("id", "customizationui-widget-panel");
       tempPanel.setAttribute("class", "cui-widget-panel");
+      tempPanel.setAttribute("viewId", aViewId);
       if (this._disableAnimations) {
         tempPanel.setAttribute("animate", "false");
       }
@@ -339,6 +349,7 @@ const PanelUI = {
                                  viewNode.querySelector(".panel-subview-footer"));
 
       let multiView = document.createElement("panelmultiview");
+      multiView.setAttribute("id", "customizationui-widget-multiview");
       multiView.setAttribute("nosubviews", "true");
       tempPanel.appendChild(multiView);
       multiView.setAttribute("mainViewIsSubView", "true");
@@ -363,6 +374,9 @@ const PanelUI = {
         document.getAnonymousElementByAttribute(aAnchor, "class",
                                                 "toolbarbutton-icon");
 
+      if (iconAnchor && aAnchor.id) {
+        iconAnchor.setAttribute("consumeanchor", aAnchor.id);
+      }
       tempPanel.openPopup(iconAnchor || aAnchor, "bottomcenter topright");
     }
   },
@@ -400,7 +414,7 @@ const PanelUI = {
     }
   },
 
-  /** 
+  /**
    * Signal that we're about to make a lot of changes to the contents of the
    * panels all at once. For performance, we ignore the mutations.
    */
@@ -427,7 +441,7 @@ const PanelUI = {
       if (!label) {
         continue;
       }
-      if (label.contains("\u00ad")) {
+      if (label.includes("\u00ad")) {
         node.setAttribute("auto-hyphens", "off");
       } else {
         node.removeAttribute("auto-hyphens");
@@ -478,12 +492,14 @@ const PanelUI = {
   },
 
   _updateQuitTooltip: function() {
-#ifndef XP_WIN
-#ifdef XP_MACOSX
-    let tooltipId = "quit-button.tooltiptext.mac";
-#else
-    let tooltipId = "quit-button.tooltiptext.linux2";
-#endif
+    if (AppConstants.platform == "win") {
+      return;
+    }
+
+    let tooltipId = AppConstants.platform == "macosx" ?
+                    "quit-button.tooltiptext.mac" :
+                    "quit-button.tooltiptext.linux2";
+
     let brands = Services.strings.createBundle("chrome://branding/locale/brand.properties");
     let stringArgs = [brands.GetStringFromName("brandShortName")];
 
@@ -492,7 +508,6 @@ const PanelUI = {
     let tooltipString = CustomizableUI.getLocalizedProperty({x: tooltipId}, "x", stringArgs);
     let quitButton = document.getElementById("PanelUI-quit");
     quitButton.setAttribute("tooltiptext", tooltipString);
-#endif
   },
 
   _overlayScrollListenerBoundFn: null,
@@ -502,25 +517,18 @@ const PanelUI = {
   },
 };
 
+XPCOMUtils.defineConstant(this, "PanelUI", PanelUI);
+
 /**
  * Gets the currently selected locale for display.
  * @return  the selected locale or "en-US" if none is selected
  */
 function getLocale() {
-  const PREF_SELECTED_LOCALE = "general.useragent.locale";
   try {
-    let locale = Services.prefs.getComplexValue(PREF_SELECTED_LOCALE,
-                                                Ci.nsIPrefLocalizedString);
-    if (locale)
-      return locale;
+    let chromeRegistry = Cc["@mozilla.org/chrome/chrome-registry;1"]
+                           .getService(Ci.nsIXULChromeRegistry);
+    return chromeRegistry.getSelectedLocale("browser");
+  } catch (ex) {
+    return "en-US";
   }
-  catch (e) { }
-
-  try {
-    return Services.prefs.getCharPref(PREF_SELECTED_LOCALE);
-  }
-  catch (e) { }
-
-  return "en-US";
 }
-

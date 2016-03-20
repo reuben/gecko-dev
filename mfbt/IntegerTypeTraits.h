@@ -79,10 +79,16 @@ struct UnsignedStdintTypeForSize
   : detail::StdintTypeForSizeAndSignedness<Size, false>
 {};
 
+template<size_t Size>
+struct SignedStdintTypeForSize
+  : detail::StdintTypeForSizeAndSignedness<Size, true>
+{};
+
 template<typename IntegerType>
 struct PositionOfSignBit
 {
-  static_assert(IsIntegral<IntegerType>::value, "PositionOfSignBit is only for integral types");
+  static_assert(IsIntegral<IntegerType>::value,
+                "PositionOfSignBit is only for integral types");
   // 8 here should be CHAR_BIT from limits.h, but the world has moved on.
   static const size_t value = 8 * sizeof(IntegerType) - 1;
 };
@@ -96,7 +102,8 @@ template<typename IntegerType>
 struct MinValue
 {
 private:
-  static_assert(IsIntegral<IntegerType>::value, "MinValue is only for integral types");
+  static_assert(IsIntegral<IntegerType>::value,
+                "MinValue is only for integral types");
 
   typedef typename MakeUnsigned<IntegerType>::Type UnsignedIntegerType;
   static const size_t PosOfSignBit = PositionOfSignBit<IntegerType>::value;
@@ -122,7 +129,8 @@ public:
 template<typename IntegerType>
 struct MaxValue
 {
-  static_assert(IsIntegral<IntegerType>::value, "MaxValue is only for integral types");
+  static_assert(IsIntegral<IntegerType>::value,
+                "MaxValue is only for integral types");
 
   // Tricksy, but covered by the CheckedInt unit test.
   // Relies on the type of MinValue<IntegerType>::value

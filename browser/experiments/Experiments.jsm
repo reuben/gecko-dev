@@ -6,7 +6,6 @@
 
 this.EXPORTED_SYMBOLS = [
   "Experiments",
-  "ExperimentsProvider",
 ];
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
@@ -20,29 +19,22 @@ Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/AsyncShutdown.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
-                                  "resource://gre/modules/UpdateChannel.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
+                                  "resource://gre/modules/UpdateUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
                                   "resource://gre/modules/AddonManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AddonManagerPrivate",
                                   "resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryPing",
-                                  "resource://gre/modules/TelemetryPing.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TelemetryEnvironment",
+                                  "resource://gre/modules/TelemetryEnvironment.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryLog",
                                   "resource://gre/modules/TelemetryLog.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TelemetryUtils",
+                                  "resource://gre/modules/TelemetryUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "CommonUtils",
                                   "resource://services-common/utils.js");
 XPCOMUtils.defineLazyModuleGetter(this, "Metrics",
                                   "resource://gre/modules/Metrics.jsm");
-
-// CertUtils.jsm doesn't expose a single "CertUtils" object like a normal .jsm
-// would.
-XPCOMUtils.defineLazyGetter(this, "CertUtils",
-  function() {
-    var mod = {};
-    Cu.import("resource://gre/modules/CertUtils.jsm", mod);
-    return mod;
-  });
 
 XPCOMUtils.defineLazyServiceGetter(this, "gCrashReporter",
                                    "@mozilla.org/xre/app-info;1",
@@ -63,17 +55,16 @@ const PREF_LOGGING              = "logging";
 const PREF_LOGGING_LEVEL        = PREF_LOGGING + ".level"; // experiments.logging.level
 const PREF_LOGGING_DUMP         = PREF_LOGGING + ".dump"; // experiments.logging.dump
 const PREF_MANIFEST_URI         = "manifest.uri"; // experiments.logging.manifest.uri
-const PREF_MANIFEST_CHECKCERT   = "manifest.cert.checkAttributes"; // experiments.manifest.cert.checkAttributes
-const PREF_MANIFEST_REQUIREBUILTIN = "manifest.cert.requireBuiltin"; // experiments.manifest.cert.requireBuiltin
-const PREF_FORCE_SAMPLE = "force-sample-value"; // experiments.force-sample-value
-
-const PREF_HEALTHREPORT_ENABLED = "datareporting.healthreport.service.enabled";
+const PREF_FORCE_SAMPLE         = "force-sample-value"; // experiments.force-sample-value
 
 const PREF_BRANCH_TELEMETRY     = "toolkit.telemetry.";
 const PREF_TELEMETRY_ENABLED    = "enabled";
 
 const URI_EXTENSION_STRINGS     = "chrome://mozapps/locale/extensions/extensions.properties";
 const STRING_TYPE_NAME          = "type.%ID%.name";
+
+const CACHE_WRITE_RETRY_DELAY_SEC = 60 * 3;
+const MANIFEST_FETCH_TIMEOUT_MSEC = 60 * 3 * 1000; // 3 minutes
 
 const TELEMETRY_LOG = {
   // log(key, [kind, experimentId, details])
@@ -104,28 +95,29 @@ const TELEMETRY_LOG = {
     RECHECK: "RECHECK",
   },
 };
+XPCOMUtils.defineConstant(this, "TELEMETRY_LOG", TELEMETRY_LOG);
 
 const gPrefs = new Preferences(PREF_BRANCH);
 const gPrefsTelemetry = new Preferences(PREF_BRANCH_TELEMETRY);
-let gExperimentsEnabled = false;
-let gAddonProvider = null;
-let gExperiments = null;
-let gLogAppenderDump = null;
-let gPolicyCounter = 0;
-let gExperimentsCounter = 0;
-let gExperimentEntryCounter = 0;
-let gPreviousProviderCounter = 0;
+var gExperimentsEnabled = false;
+var gAddonProvider = null;
+var gExperiments = null;
+var gLogAppenderDump = null;
+var gPolicyCounter = 0;
+var gExperimentsCounter = 0;
+var gExperimentEntryCounter = 0;
+var gPreviousProviderCounter = 0;
 
 // Tracks active AddonInstall we know about so we can deny external
 // installs.
-let gActiveInstallURLs = new Set();
+var gActiveInstallURLs = new Set();
 
 // Tracks add-on IDs that are being uninstalled by us. This allows us
 // to differentiate between expected uninstalled and user-driven uninstalls.
-let gActiveUninstallAddonIDs = new Set();
+var gActiveUninstallAddonIDs = new Set();
 
-let gLogger;
-let gLogDumping = false;
+var gLogger;
+var gLogDumping = false;
 
 function configureLogging() {
   if (!gLogger) {
@@ -147,35 +139,13 @@ function configureLogging() {
   }
 }
 
-// Takes an array of promises and returns a promise that is resolved once all of
-// them are rejected or resolved.
-function allResolvedOrRejected(promises) {
-  if (!promises.length) {
-    return Promise.resolve([]);
-  }
-
-  let countdown = promises.length;
-  let deferred = Promise.defer();
-
-  for (let p of promises) {
-    let helper = () => {
-      if (--countdown == 0) {
-        deferred.resolve();
-      }
-    };
-    Promise.resolve(p).then(helper, helper);
-  }
-
-  return deferred.promise;
-}
-
 // Loads a JSON file using OS.file. file is a string representing the path
 // of the file to be read, options contains additional options to pass to
 // OS.File.read.
 // Returns a Promise resolved with the json payload or rejected with
 // OS.File.Error or JSON.parse() errors.
 function loadJSONAsync(file, options) {
-  return Task.spawn(function() {
+  return Task.spawn(function*() {
     let rawData = yield OS.File.read(file, options);
     // Read json file into a string
     let data;
@@ -187,12 +157,8 @@ function loadJSONAsync(file, options) {
       gLogger.error("Experiments: Could not parse JSON: " + file + " " + ex);
       throw ex;
     }
-    throw new Task.Result(data);
+    return data;
   });
-}
-
-function telemetryEnabled() {
-  return gPrefsTelemetry.get(PREF_TELEMETRY_ENABLED, false);
 }
 
 // Returns a promise that is resolved with the AddonInstall for that URL.
@@ -208,7 +174,7 @@ function addonInstallForURL(url, hash) {
 function installedExperimentAddons() {
   let deferred = Promise.defer();
   AddonManager.getAddonsByTypes(["experiment"], (addons) => {
-    deferred.resolve([a for (a of addons) if (!a.appDisabled)]);
+    deferred.resolve(addons.filter(a => !a.appDisabled));
   });
   return deferred.promise;
 }
@@ -216,7 +182,7 @@ function installedExperimentAddons() {
 // Takes an Array<Addon> and returns a promise that is resolved when the
 // addons are uninstalled.
 function uninstallAddons(addons) {
-  let ids = new Set([a.id for (a of addons)]);
+  let ids = new Set(addons.map(addon => addon.id));
   let deferred = Promise.defer();
 
   let listener = {};
@@ -249,7 +215,7 @@ function uninstallAddons(addons) {
  * The experiments module.
  */
 
-let Experiments = {
+var Experiments = {
   /**
    * Provides access to the global `Experiments.Experiments` instance.
    */
@@ -307,7 +273,7 @@ Experiments.Policy.prototype = {
   },
 
   updatechannel: function () {
-    return UpdateChannel.get();
+    return UpdateUtils.UpdateChannel;
   },
 
   locale: function () {
@@ -315,23 +281,12 @@ Experiments.Policy.prototype = {
     return chrome.getSelectedLocale("global");
   },
 
-  /*
-   * @return Promise<> Resolved with the payload data.
+  /**
+   * For testing a race condition, one of the tests delays the callback of
+   * writing the cache by replacing this policy function.
    */
-  healthReportPayload: function () {
-    return Task.spawn(function*() {
-      let reporter = Cc["@mozilla.org/datareporting/service;1"]
-            .getService(Ci.nsISupports)
-            .wrappedJSObject
-            .healthReporter;
-      yield reporter.onInit();
-      let payload = yield reporter.collectAndObtainJSONPayload();
-      return payload;
-    });
-  },
-
-  telemetryPayload: function () {
-    return TelemetryPing.getPayload();
+  delayCacheWrite: function(promise) {
+    return promise;
   },
 };
 
@@ -342,19 +297,44 @@ function AlreadyShutdownError(message="already shut down") {
   this.message = message;
   this.stack = error.stack;
 }
-
 AlreadyShutdownError.prototype = Object.create(Error.prototype);
 AlreadyShutdownError.prototype.constructor = AlreadyShutdownError;
+
+function CacheWriteError(message="Error writing cache file") {
+  Error.call(this, message);
+  let error = new Error();
+  this.name = "CacheWriteError";
+  this.message = message;
+  this.stack = error.stack;
+}
+CacheWriteError.prototype = Object.create(Error.prototype);
+CacheWriteError.prototype.constructor = CacheWriteError;
 
 /**
  * Manages the experiments and provides an interface to control them.
  */
 
 Experiments.Experiments = function (policy=new Experiments.Policy()) {
-  this._log = Log.repository.getLoggerWithMessagePrefix(
-    "Browser.Experiments.Experiments",
-    "Experiments #" + gExperimentsCounter++ + "::");
+  let log = Log.repository.getLoggerWithMessagePrefix(
+      "Browser.Experiments.Experiments",
+      "Experiments #" + gExperimentsCounter++ + "::");
+
+  // At the time of this writing, Experiments.jsm has severe
+  // crashes. For forensics purposes, keep the last few log
+  // messages in memory and upload them in case of crash.
+  this._forensicsLogs = [];
+  this._forensicsLogs.length = 30;
+  this._log = Object.create(log);
+  this._log.log = (level, string, params) => {
+    this._addToForensicsLog("Experiments", string);
+    log.log(level, string, params);
+  };
+
   this._log.trace("constructor");
+
+  // Capture the latest error, for forensics purposes.
+  this._latestError = null;
+
 
   this._policy = policy;
 
@@ -381,6 +361,7 @@ Experiments.Experiments = function (policy=new Experiments.Policy()) {
   this._timer = null;
 
   this._shutdown = false;
+  this._networkRequest = null;
 
   // We need to tell when we first evaluated the experiments to fire an
   // experiments-changed notification when we only loaded completed experiments.
@@ -392,11 +373,19 @@ Experiments.Experiments = function (policy=new Experiments.Policy()) {
 Experiments.Experiments.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsITimerCallback, Ci.nsIObserver]),
 
+  /**
+   * `true` if the experiments manager is currently setup (has been fully initialized
+   * and not uninitialized yet).
+   */
+  get isReady() {
+    return !this._shutdown;
+  },
+
   init: function () {
     this._shutdown = false;
     configureLogging();
 
-    gExperimentsEnabled = gPrefs.get(PREF_ENABLED, false);
+    gExperimentsEnabled = gPrefs.get(PREF_ENABLED, false) && TelemetryUtils.isTelemetryEnabled;
     this._log.trace("enabled=" + gExperimentsEnabled + ", " + this.enabled);
 
     gPrefs.observe(PREF_LOGGING, configureLogging);
@@ -405,8 +394,10 @@ Experiments.Experiments.prototype = {
 
     gPrefsTelemetry.observe(PREF_TELEMETRY_ENABLED, this._telemetryStatusChanged, this);
 
-    AsyncShutdown.profileBeforeChange.addBlocker("Experiments.jsm shutdown",
-      this.uninit.bind(this));
+    AddonManager.shutdown.addBlocker("Experiments.jsm shutdown",
+      this.uninit.bind(this),
+      this._getState.bind(this)
+    );
 
     this._registerWithAddonManager();
 
@@ -420,6 +411,7 @@ Experiments.Experiments.prototype = {
       },
       (e) => {
         this._log.error("_loadFromCache caught error: " + e);
+        this._latestError = e;
         throw e;
       }
     );
@@ -458,16 +450,66 @@ Experiments.Experiments.prototype = {
 
     this._shutdown = true;
     if (this._mainTask) {
+      if (this._networkRequest) {
+        try {
+          this._log.trace("Aborting pending network request: " + this._networkRequest);
+          this._networkRequest.abort();
+        } catch (e) {
+          // pass
+        }
+      }
       try {
         this._log.trace("uninit: waiting on _mainTask");
         yield this._mainTask;
-      } catch (e if e instanceof AlreadyShutdownError) {
-        // We error out of tasks after shutdown via that exception.
+      } catch (e) {
+        // We error out of tasks after shutdown via this exception.
+        this._log.trace(`uninit: caught error - ${e}`);
+        if (!(e instanceof AlreadyShutdownError)) {
+          this._latestError = e;
+          throw e;
+        }
       }
     }
 
     this._log.info("Completed uninitialization.");
   }),
+
+  // Return state information, for debugging purposes.
+  _getState: function() {
+    let activeExperiment = this._getActiveExperiment();
+    let state = {
+      isShutdown: this._shutdown,
+      isEnabled: gExperimentsEnabled,
+      isRefresh: this._refresh,
+      isDirty: this._dirty,
+      isFirstEvaluate: this._firstEvaluate,
+      hasLoadTask: !!this._loadTask,
+      hasMainTask: !!this._mainTask,
+      hasTimer: !!this._hasTimer,
+      hasAddonProvider: !!gAddonProvider,
+      latestLogs: this._forensicsLogs,
+      experiments: this._experiments ? [...this._experiments.keys()] : null,
+      terminateReason: this._terminateReason,
+      activeExperiment: !!activeExperiment ? activeExperiment.id : null,
+    };
+    if (this._latestError) {
+      if (typeof this._latestError == "object") {
+        state.latestError = {
+          message: this._latestError.message,
+          stack: this._latestError.stack
+        };
+      } else {
+        state.latestError = "" + this._latestError;
+      }
+    }
+    return state;
+  },
+
+  _addToForensicsLog: function (what, string) {
+    this._forensicsLogs.shift();
+    let timeInSec = Math.floor(Services.telemetry.msSinceProcessStart() / 1000);
+    this._forensicsLogs.push(`${timeInSec}: ${what} - ${string}`);
+  },
 
   _registerWithAddonManager: function (previousExperimentsProvider) {
     this._log.trace("Registering instance with Addon Manager.");
@@ -495,14 +537,17 @@ Experiments.Experiments.prototype = {
   _unregisterWithAddonManager: function () {
     this._log.trace("Unregistering instance with Addon Manager.");
 
+    this._log.trace("Removing install listener from add-on manager.");
+    AddonManager.removeInstallListener(this);
+    this._log.trace("Removing addon listener from add-on manager.");
+    AddonManager.removeAddonListener(this);
+    this._log.trace("Finished unregistering with addon manager.");
+
     if (gAddonProvider) {
       this._log.trace("Unregistering previous experiment add-on provider.");
       AddonManagerPrivate.unregisterProvider(gAddonProvider);
       gAddonProvider = null;
     }
-
-    AddonManager.removeInstallListener(this);
-    AddonManager.removeAddonListener(this);
   },
 
   /*
@@ -541,7 +586,7 @@ Experiments.Experiments.prototype = {
   _toggleExperimentsEnabled: Task.async(function* (enabled) {
     this._log.trace("_toggleExperimentsEnabled(" + enabled + ")");
     let wasEnabled = gExperimentsEnabled;
-    gExperimentsEnabled = enabled && telemetryEnabled();
+    gExperimentsEnabled = enabled && TelemetryUtils.isTelemetryEnabled;
 
     if (wasEnabled == gExperimentsEnabled) {
       return;
@@ -597,7 +642,7 @@ Experiments.Experiments.prototype = {
           active: experiment.enabled,
           endDate: experiment.endDate.getTime(),
           detailURL: experiment._homepageURL,
-	  branch: experiment.branch,
+          branch: experiment.branch,
         });
       }
 
@@ -646,6 +691,7 @@ Experiments.Experiments.prototype = {
       throw new Error("Experiment not found");
     }
     e.branch = String(branchstr);
+    this._log.trace("setExperimentBranch(" + id + ", " + e.branch + ") _dirty=" + this._dirty);
     this._dirty = true;
     Services.obs.notifyObservers(null, EXPERIMENTS_CHANGED_TOPIC, null);
     yield this._run();
@@ -671,7 +717,7 @@ Experiments.Experiments.prototype = {
     } else {
       e = this._getActiveExperiment();
       if (e === null) {
-	throw new Error("No active experiment");
+        throw new Error("No active experiment");
       }
     }
     return e.branch;
@@ -723,16 +769,22 @@ Experiments.Experiments.prototype = {
         try {
           yield this._main();
         } catch (e) {
-          this._log.error("_main caught error: " + e);
-          return;
+          // In the CacheWriteError case we want to reschedule
+          if (!(e instanceof CacheWriteError)) {
+            this._log.error("_main caught error: " + e);
+            return;
+          }
         } finally {
           this._mainTask = null;
         }
         this._log.trace("_main finished, scheduling next run");
         try {
           yield this._scheduleNextRun();
-        } catch (ex if ex instanceof AlreadyShutdownError) {
-          // We error out of tasks after shutdown via that exception.
+        } catch (ex) {
+          // We error out of tasks after shutdown via this exception.
+          if (!(ex instanceof AlreadyShutdownError)) {
+            throw ex;
+          }
         }
       }.bind(this));
     }
@@ -757,7 +809,7 @@ Experiments.Experiments.prototype = {
       // If somebody called .updateManifest() or disableExperiment()
       // while we were running, go again right now.
     }
-    while (this._refresh || this._terminateReason);
+    while (this._refresh || this._terminateReason || this._dirty);
   },
 
   _loadManifest: function*() {
@@ -826,15 +878,18 @@ Experiments.Experiments.prototype = {
     this.disableExperiment(TELEMETRY_LOG.TERMINATION.ADDON_UNINSTALLED);
   },
 
+  /**
+   * @returns {Boolean} returns false when we cancel the install.
+   */
   onInstallStarted: function (install) {
     if (install.addon.type != "experiment") {
-      return;
+      return true;
     }
 
     this._log.trace("onInstallStarted() - " + install.addon.id);
     if (install.addon.appDisabled) {
       // This is a PreviousExperiment
-      return;
+      return true;
     }
 
     // We want to be in control of all experiment add-ons: reject installs
@@ -854,13 +909,13 @@ Experiments.Experiments.prototype = {
     if (this._trackedAddonIds.has(install.addon.id)) {
       this._log.info("onInstallStarted allowing install because add-on ID " +
                      "tracked by us.");
-      return;
+      return true;
     }
 
     if (gActiveInstallURLs.has(install.sourceURI.spec)) {
       this._log.info("onInstallStarted allowing install because install " +
                      "tracked by us.");
-      return;
+      return true;
     }
 
     this._log.warn("onInstallStarted cancelling install of unknown " +
@@ -894,42 +949,36 @@ Experiments.Experiments.prototype = {
       return Promise.reject(new Error("Experiments - Error opening XHR for " + url));
     }
 
+    this._networkRequest = xhr;
     let deferred = Promise.defer();
 
     let log = this._log;
-    xhr.onerror = function (e) {
-      log.error("httpGetRequest::onError() - Error making request to " + url + ": " + e.error);
-      deferred.reject(new Error("Experiments - XHR error for " + url + " - " + e.error));
+    let errorhandler = (evt) => {
+      log.error("httpGetRequest::onError() - Error making request to " + url + ": " + evt.type);
+      deferred.reject(new Error("Experiments - XHR error for " + url + " - " + evt.type));
+      this._networkRequest = null;
     };
+    xhr.onerror = errorhandler;
+    xhr.ontimeout = errorhandler;
+    xhr.onabort = errorhandler;
 
-    xhr.onload = function (event) {
+    xhr.onload = (event) => {
       if (xhr.status !== 200 && xhr.state !== 0) {
         log.error("httpGetRequest::onLoad() - Request to " + url + " returned status " + xhr.status);
         deferred.reject(new Error("Experiments - XHR status for " + url + " is " + xhr.status));
-        return;
-      }
-
-      let certs = null;
-      if (gPrefs.get(PREF_MANIFEST_CHECKCERT, true)) {
-        certs = CertUtils.readCertPrefs(PREF_BRANCH + "manifest.certs.");
-      }
-      try {
-        let allowNonBuiltin = !gPrefs.get(PREF_MANIFEST_REQUIREBUILTIN, true);
-        CertUtils.checkCert(xhr.channel, allowNonBuiltin, certs);
-      }
-      catch (e) {
-        log.error("manifest fetch failed certificate checks", [e]);
-        deferred.reject(new Error("Experiments - manifest fetch failed certificate checks: " + e));
+        this._networkRequest = null;
         return;
       }
 
       deferred.resolve(xhr.responseText);
+      this._networkRequest = null;
     };
 
     if (xhr.channel instanceof Ci.nsISupportsPriority) {
       xhr.channel.priority = Ci.nsISupportsPriority.PRIORITY_LOWEST;
     }
 
+    xhr.timeout = MANIFEST_FETCH_TIMEOUT_MSEC;
     xhr.send(null);
     return deferred.promise;
   },
@@ -947,16 +996,24 @@ Experiments.Experiments.prototype = {
   _saveToCache: function* () {
     this._log.trace("_saveToCache");
     let path = this._cacheFilePath;
-    let textData = JSON.stringify({
-      version: CACHE_VERSION,
-      data: [e[1].toJSON() for (e of this._experiments.entries())],
-    });
-
-    let encoder = new TextEncoder();
-    let data = encoder.encode(textData);
-    let options = { tmpPath: path + ".tmp", compression: "lz4" };
-    yield OS.File.writeAtomic(path, data, options);
     this._dirty = false;
+    try {
+      let textData = JSON.stringify({
+        version: CACHE_VERSION,
+        data: [...this._experiments.values()].map(e => e.toJSON()),
+      });
+
+      let encoder = new TextEncoder();
+      let data = encoder.encode(textData);
+      let options = { tmpPath: path + ".tmp", compression: "lz4" };
+      yield this._policy.delayCacheWrite(OS.File.writeAtomic(path, data, options));
+    } catch (e) {
+      // We failed to write the cache, it's still dirty.
+      this._dirty = true;
+      this._log.error("_saveToCache failed and caught error: " + e);
+      throw new CacheWriteError();
+    }
+
     this._log.debug("_saveToCache saved to " + path);
   },
 
@@ -969,9 +1026,13 @@ Experiments.Experiments.prototype = {
     try {
       let result = yield loadJSONAsync(path, { compression: "lz4" });
       this._populateFromCache(result);
-    } catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
-      // No cached manifest yet.
-      this._experiments = new Map();
+    } catch (e) {
+      if (e instanceof OS.File.Error && e.becauseNoSuchFile) {
+        // No cached manifest yet.
+        this._experiments = new Map();
+      } else {
+        throw e;
+      }
     }
   }),
 
@@ -990,6 +1051,14 @@ Experiments.Experiments.prototype = {
       if (!entry.initFromCacheData(item)) {
         continue;
       }
+
+      // Discard old experiments if they ended more than 180 days ago.
+      if (entry.shouldDiscard()) {
+        // We discarded an experiment, the cache needs to be updated.
+        this._dirty = true;
+        continue;
+      }
+
       experiments.set(entry.id, entry);
     }
 
@@ -1074,7 +1143,7 @@ Experiments.Experiments.prototype = {
   },
 
   _getActiveExperiment: function () {
-    let enabled = [experiment for ([,experiment] of this._experiments) if (experiment._enabled)];
+    let enabled = [...this._experiments.values()].filter(experiment => experiment._enabled);
 
     if (enabled.length == 1) {
       return enabled[0];
@@ -1111,7 +1180,7 @@ Experiments.Experiments.prototype = {
       return new Set();
     }
 
-    return new Set([e._addonId for ([,e] of this._experiments) if (e._addonId)]);
+    return new Set([...this._experiments.values()].map(e => e._addonId));
   },
 
   /*
@@ -1139,10 +1208,10 @@ Experiments.Experiments.prototype = {
     // knowledge for these unknown experiment add-ons.
     let installedExperiments = yield installedExperimentAddons();
     let expectedAddonIds = this._trackedAddonIds;
-    let unknownAddons = [a for (a of installedExperiments) if (!expectedAddonIds.has(a.id))];
+    let unknownAddons = installedExperiments.filter(a => !expectedAddonIds.has(a.id));
     if (unknownAddons.length) {
       this._log.warn("_evaluateExperiments() - unknown add-ons in AddonManager: " +
-                     [a.id for (a of unknownAddons)].join(", "));
+                     unknownAddons.map(a => a.id).join(", "));
 
       yield uninstallAddons(unknownAddons);
     }
@@ -1247,6 +1316,7 @@ Experiments.Experiments.prototype = {
     if ("@mozilla.org/toolkit/crash-reporter;1" in Cc && activeExperiment) {
       try {
         gCrashReporter.annotateCrashReport("ActiveExperiment", activeExperiment.id);
+        gCrashReporter.annotateCrashReport("ActiveExperimentBranch", activeExperiment.branch);
       } catch (e) {
         // It's ok if crash reporting is disabled.
       }
@@ -1269,6 +1339,10 @@ Experiments.Experiments.prototype = {
 
     let time = null;
     let now = this._policy.now().getTime();
+    if (this._dirty) {
+      // If we failed to write the cache, we should try again periodically
+      time = now + 1000 * CACHE_WRITE_RETRY_DELAY_SEC;
+    }
 
     for (let [id, experiment] of this._experiments) {
       let scheduleTime = experiment.getScheduleTime();
@@ -1298,9 +1372,16 @@ Experiments.Experiments.prototype = {
 
 Experiments.ExperimentEntry = function (policy) {
   this._policy = policy || new Experiments.Policy();
-  this._log = Log.repository.getLoggerWithMessagePrefix(
+  let log = Log.repository.getLoggerWithMessagePrefix(
     "Browser.Experiments.Experiments",
     "ExperimentEntry #" + gExperimentEntryCounter++ + "::");
+  this._log = Object.create(log);
+  this._log.log = (level, string, params) => {
+    if (gExperiments) {
+      gExperiments._addToForensicsLog("ExperimentEntry", string);
+    }
+    log.log(level, string, params);
+  };
 
   // Is the experiment supposed to be running.
   this._enabled = false;
@@ -1453,7 +1534,7 @@ Experiments.ExperimentEntry.prototype = {
   initFromCacheData: function (data) {
     for (let [key, dval] of this.UPGRADE_KEYS) {
       if (!(key in data)) {
-        data.set(key, dval);
+        data[key] = dval;
       }
     }
 
@@ -1462,7 +1543,7 @@ Experiments.ExperimentEntry.prototype = {
         this._log.error("initFromCacheData() - missing required key " + key);
         return false;
       }
-    };
+    }
 
     if (!this._isManifestDataValid(data._manifestData)) {
       return false;
@@ -1485,7 +1566,9 @@ Experiments.ExperimentEntry.prototype = {
       }
     });
 
-    this._lastChangedDate = this._policy.now();
+    // In order for the experiment's data expiration mechanism to work, use the experiment's
+    // |_endData| as the |_lastChangedDate| (if available).
+    this._lastChangedDate = !!this._endDate ? this._endDate : this._policy.now();
 
     return true;
   },
@@ -1567,8 +1650,7 @@ Experiments.ExperimentEntry.prototype = {
     let startSec = (this.startDate || 0) / 1000;
 
     this._log.trace("isApplicable() - now=" + now
-                    + ", randomValue=" + this._randomValue
-                    + ", data=" + JSON.stringify(this._manifestData));
+                    + ", randomValue=" + this._randomValue);
 
     // Not applicable if it already ran.
 
@@ -1590,7 +1672,7 @@ Experiments.ExperimentEntry.prototype = {
       { name: "endTime",
         condition: () => now < data.endTime },
       { name: "maxStartTime",
-        condition: () => !data.maxStartTime || now <= data.maxStartTime },
+        condition: () => this._startDate || !data.maxStartTime || now <= data.maxStartTime },
       { name: "maxActiveSeconds",
         condition: () => !this._startDate || now <= (startSec + maxActive) },
       { name: "appName",
@@ -1637,50 +1719,47 @@ Experiments.ExperimentEntry.prototype = {
    * Run the jsfilter function from the manifest in a sandbox and return the
    * result (forced to boolean).
    */
-  _runFilterFunction: function (jsfilter) {
+  _runFilterFunction: Task.async(function* (jsfilter) {
     this._log.trace("runFilterFunction() - filter: " + jsfilter);
 
-    return Task.spawn(function ExperimentEntry_runFilterFunction_task() {
-      const nullprincipal = Cc["@mozilla.org/nullprincipal;1"].createInstance(Ci.nsIPrincipal);
-      let options = {
-        sandboxName: "telemetry experiments jsfilter sandbox",
-        wantComponents: false,
-      };
+    const nullprincipal = Cc["@mozilla.org/nullprincipal;1"].createInstance(Ci.nsIPrincipal);
+    let options = {
+      sandboxName: "telemetry experiments jsfilter sandbox",
+      wantComponents: false,
+    };
 
-      let sandbox = Cu.Sandbox(nullprincipal, options);
-      try {
-        Cu.evalInSandbox(jsfilter, sandbox);
-      } catch (e) {
-        this._log.error("runFilterFunction() - failed to eval jsfilter: " + e.message);
-        throw ["jsfilter-evalfailed"];
-      }
+    let sandbox = Cu.Sandbox(nullprincipal, options);
+    try {
+      Cu.evalInSandbox(jsfilter, sandbox);
+    } catch (e) {
+      this._log.error("runFilterFunction() - failed to eval jsfilter: " + e.message);
+      throw ["jsfilter-evalfailed"];
+    }
 
-      // You can't insert arbitrarily complex objects into a sandbox, so
-      // we serialize everything through JSON.
-      sandbox._hr = yield this._policy.healthReportPayload();
-      Object.defineProperty(sandbox, "_t",
-        { get: () => JSON.stringify(this._policy.telemetryPayload()) });
+    let currentEnvironment = yield TelemetryEnvironment.onInitialized();
 
-      let result = false;
-      try {
-        result = !!Cu.evalInSandbox("filter({healthReportPayload: JSON.parse(_hr), telemetryPayload: JSON.parse(_t)})", sandbox);
-      }
-      catch (e) {
-        this._log.debug("runFilterFunction() - filter function failed: "
+    Object.defineProperty(sandbox, "_e",
+      { get: () => Cu.cloneInto(currentEnvironment, sandbox) });
+
+    let result = false;
+    try {
+      result = !!Cu.evalInSandbox("filter({get telemetryEnvironment() { return _e; } })", sandbox);
+    }
+    catch (e) {
+      this._log.debug("runFilterFunction() - filter function failed: "
                       + e.message + ", " + e.stack);
-        throw ["jsfilter-threw", e.message];
-      }
-      finally {
-        Cu.nukeSandbox(sandbox);
-      }
+      throw ["jsfilter-threw", e.message];
+    }
+    finally {
+      Cu.nukeSandbox(sandbox);
+    }
 
-      if (!result) {
-        throw ["jsfilter-false"];
-      }
+    if (!result) {
+      throw ["jsfilter-false"];
+    }
 
-      throw new Task.Result(true);
-    }.bind(this));
-  },
+    return true;
+  }),
 
   /*
    * Start running the experiment.
@@ -1894,6 +1973,16 @@ Experiments.ExperimentEntry.prototype = {
       return changes;
     }
 
+    // Check permissions to see if we can enable the addon.
+    if (!(addon.permissions & AddonManager.PERM_CAN_ENABLE)) {
+      throw new Error("Don't have permission to enable addon " + addon.id + ", perm=" + addon.permission);
+    }
+
+    // Experiment addons should not require a restart.
+    if (!!(addon.operationsRequiringRestart & AddonManager.OP_NEEDS_RESTART_ENABLE)) {
+      throw new Error("Experiment addon requires a restart: " + addon.id);
+    }
+
     let deferred = Promise.defer();
 
     // Else we need to enable it.
@@ -1908,13 +1997,24 @@ Experiments.ExperimentEntry.prototype = {
       },
     };
 
-    this._log.info("Activating add-on: " + addon.id);
+    for (let handler of ["onDisabled", "onOperationCancelled", "onUninstalled"]) {
+      listener[handler] = (evtAddon) => {
+        if (evtAddon.id != addon.id) {
+          return;
+        }
+
+        AddonManager.removeAddonListener(listener);
+        deferred.reject("Failed to enable addon " + addon.id + " due to: " + handler);
+      };
+    }
+
+    this._log.info("reconcileAddonState() - Activating add-on: " + addon.id);
     AddonManager.addAddonListener(listener);
     addon.userDisabled = false;
     yield deferred.promise;
     changes |= this.ADDON_CHANGE_ENABLE;
 
-    this._log.info("Add-on has been enabled: " + addon.id);
+    this._log.info("reconcileAddonState() - Add-on has been enabled: " + addon.id);
     return changes;
    }),
 
@@ -2034,132 +2134,17 @@ Experiments.ExperimentEntry.prototype = {
   },
 };
 
-
-
 /**
  * Strip a Date down to its UTC midnight.
  *
  * This will return a cloned Date object. The original is unchanged.
  */
-let stripDateToMidnight = function (d) {
+var stripDateToMidnight = function (d) {
   let m = new Date(d);
   m.setUTCHours(0, 0, 0, 0);
 
   return m;
 };
-
-function ExperimentsLastActiveMeasurement1() {
-  Metrics.Measurement.call(this);
-}
-function ExperimentsLastActiveMeasurement2() {
-  Metrics.Measurement.call(this);
-}
-
-const FIELD_DAILY_LAST_TEXT = {type: Metrics.Storage.FIELD_DAILY_LAST_TEXT};
-
-ExperimentsLastActiveMeasurement1.prototype = Object.freeze({
-  __proto__: Metrics.Measurement.prototype,
-
-  name: "info",
-  version: 1,
-
-  fields: {
-    lastActive: FIELD_DAILY_LAST_TEXT,
-  }
-});
-ExperimentsLastActiveMeasurement2.prototype = Object.freeze({
-  __proto__: Metrics.Measurement.prototype,
-
-  name: "info",
-  version: 2,
-
-  fields: {
-    lastActive: FIELD_DAILY_LAST_TEXT,
-    lastActiveBranch: FIELD_DAILY_LAST_TEXT,
-  }
-});
-
-this.ExperimentsProvider = function () {
-  Metrics.Provider.call(this);
-
-  this._experiments = null;
-};
-
-ExperimentsProvider.prototype = Object.freeze({
-  __proto__: Metrics.Provider.prototype,
-
-  name: "org.mozilla.experiments",
-
-  measurementTypes: [
-    ExperimentsLastActiveMeasurement1,
-    ExperimentsLastActiveMeasurement2,
-  ],
-
-  _OBSERVERS: [
-    EXPERIMENTS_CHANGED_TOPIC,
-  ],
-
-  postInit: function () {
-    for (let o of this._OBSERVERS) {
-      Services.obs.addObserver(this, o, false);
-    }
-
-    return Promise.resolve();
-  },
-
-  onShutdown: function () {
-    for (let o of this._OBSERVERS) {
-      Services.obs.removeObserver(this, o);
-    }
-
-    return Promise.resolve();
-  },
-
-  observe: function (subject, topic, data) {
-    switch (topic) {
-      case EXPERIMENTS_CHANGED_TOPIC:
-        this.recordLastActiveExperiment();
-        break;
-    }
-  },
-
-  collectDailyData: function () {
-    return this.recordLastActiveExperiment();
-  },
-
-  recordLastActiveExperiment: function () {
-    if (!gExperimentsEnabled) {
-      return Promise.resolve();
-    }
-
-    if (!this._experiments) {
-      this._experiments = Experiments.instance();
-    }
-
-    let m = this.getMeasurement(ExperimentsLastActiveMeasurement2.prototype.name,
-                                ExperimentsLastActiveMeasurement2.prototype.version);
-
-    return this.enqueueStorageOperation(() => {
-      return Task.spawn(function* recordTask() {
-        let todayActive = yield this._experiments.lastActiveToday();
-        if (!todayActive) {
-          this._log.info("No active experiment on this day: " +
-                         this._experiments._policy.now());
-          return;
-        }
-
-        this._log.info("Recording last active experiment: " + todayActive.id);
-        yield m.setDailyLastText("lastActive", todayActive.id,
-                                 this._experiments._policy.now());
-        let branch = todayActive.branch;
-        if (branch) {
-          yield m.setDailyLastText("lastActiveBranch", branch,
-                                   this._experiments._policy.now());
-        }
-      }.bind(this));
-    });
-  },
-});
 
 /**
  * An Add-ons Manager provider that knows about old experiments.
@@ -2178,6 +2163,8 @@ this.Experiments.PreviousExperimentProvider = function (experiments) {
 }
 
 this.Experiments.PreviousExperimentProvider.prototype = Object.freeze({
+  name: "PreviousExperimentProvider",
+
   startup: function () {
     this._log.trace("startup()");
     Services.obs.addObserver(this, EXPERIMENTS_CHANGED_TOPIC, false);
@@ -2185,7 +2172,11 @@ this.Experiments.PreviousExperimentProvider.prototype = Object.freeze({
 
   shutdown: function () {
     this._log.trace("shutdown()");
-    Services.obs.removeObserver(this, EXPERIMENTS_CHANGED_TOPIC);
+    try {
+      Services.obs.removeObserver(this, EXPERIMENTS_CHANGED_TOPIC);
+    } catch(e) {
+      // Prevent crash in mochitest-browser3 on Mulet
+    }
   },
 
   observe: function (subject, topic, data) {
@@ -2213,18 +2204,18 @@ this.Experiments.PreviousExperimentProvider.prototype = Object.freeze({
       return;
     }
 
-    cb([new PreviousExperimentAddon(e) for (e of this._experimentList)]);
+    cb(this._experimentList.map(e => new PreviousExperimentAddon(e)));
   },
 
   _updateExperimentList: function () {
     return this._experiments.getExperiments().then((experiments) => {
-      let list = [e for (e of experiments) if (!e.active)];
+      let list = experiments.filter(e => !e.active);
 
-      let newMap = new Map([[e.id, e] for (e of list)]);
-      let oldMap = new Map([[e.id, e] for (e of this._experimentList)]);
+      let newMap = new Map(list.map(e => [e.id, e]));
+      let oldMap = new Map(this._experimentList.map(e => [e.id, e]));
 
-      let added = [e.id for (e of list) if (!oldMap.has(e.id))];
-      let removed = [e.id for (e of this._experimentList) if (!newMap.has(e.id))];
+      let added = [...newMap.keys()].filter(id => !oldMap.has(id));
+      let removed = [...oldMap.keys()].filter(id => !newMap.has(id));
 
       for (let id of added) {
         this._log.trace("updateExperimentList() - adding " + id);

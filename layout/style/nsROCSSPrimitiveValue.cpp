@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21,7 +22,6 @@ nsROCSSPrimitiveValue::nsROCSSPrimitiveValue()
   : CSSValue(), mType(CSS_PX)
 {
   mValue.mAppUnits = 0;
-  SetIsDOMBinding();
 }
 
 
@@ -61,9 +61,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsROCSSPrimitiveValue)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 JSObject*
-nsROCSSPrimitiveValue::WrapObject(JSContext *cx)
+nsROCSSPrimitiveValue::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return dom::CSSPrimitiveValueBinding::Wrap(cx, this);
+  return dom::CSSPrimitiveValueBinding::Wrap(cx, this, aGivenProto);
 }
 
 // nsIDOMCSSValue
@@ -429,7 +429,7 @@ nsROCSSPrimitiveValue::GetFloatValue(uint16_t aType, float *aVal)
 {
   ErrorResult rv;
   *aVal = GetFloatValue(aType, rv);
-  return rv.ErrorCode();
+  return rv.StealNSResult();
 }
 
 
@@ -509,7 +509,7 @@ nsROCSSPrimitiveValue::GetRectValue(nsIDOMRect** aRect)
 {
   ErrorResult error;
   NS_IF_ADDREF(*aRect = GetRectValue(error));
-  return error.ErrorCode();
+  return error.StealNSResult();
 }
 
 nsDOMCSSRGBColor*
@@ -527,9 +527,9 @@ nsROCSSPrimitiveValue::GetRGBColorValue(ErrorResult& aRv)
 void
 nsROCSSPrimitiveValue::SetNumber(float aValue)
 {
-    Reset();
-    mValue.mFloat = aValue;
-    mType = CSS_NUMBER;
+  Reset();
+  mValue.mFloat = aValue;
+  mType = CSS_NUMBER;
 }
 
 void
@@ -698,7 +698,7 @@ nsROCSSPrimitiveValue::Reset()
     case CSS_ATTR:
     case CSS_COUNTER: // FIXME: Counter should use an object
       NS_ASSERTION(mValue.mString, "Null string should never happen");
-      nsMemory::Free(mValue.mString);
+      free(mValue.mString);
       mValue.mString = nullptr;
       break;
     case CSS_URI:

@@ -14,6 +14,7 @@ import traceback
 from mozhttpd import MozHttpd
 import mozinfo
 from mozprofile import Profile
+import mozversion
 
 from .firefoxrunner import TPSFirefoxRunner
 from .phase import TPSTestPhase
@@ -46,7 +47,7 @@ class TempFile(object):
 
 class TPSTestRunner(object):
 
-    default_env = {
+    extra_env = {
         'MOZ_CRASHREPORTER_DISABLE': '1',
         'GNOME_DISABLE_CRASH_DIALOG': '1',
         'XRE_NO_WINDOWS_CRASH_DIALOG': '1',
@@ -71,6 +72,8 @@ class TPSTestRunner(object):
         'services.sync.firstSync': 'notReady',
         'services.sync.lastversion': '1.0',
         'toolkit.startup.max_resumed_crashes': -1,
+        # hrm - not sure what the release/beta channels will do?
+        'xpinstall.signatures.required': False,
     }
 
     debug_preferences = {
@@ -115,7 +118,8 @@ class TPSTestRunner(object):
                  mobile=False,
                  rlock=None,
                  resultfile='tps_result.json',
-                 testfile=None):
+                 testfile=None,
+                 stop_on_error=False):
         self.binary = binary
         self.config = config if config else {}
         self.debug = debug
@@ -126,6 +130,7 @@ class TPSTestRunner(object):
         self.rlock = rlock
         self.resultfile = resultfile
         self.testfile = testfile
+        self.stop_on_error = stop_on_error
 
         self.addonversion = None
         self.branch = None
@@ -294,7 +299,7 @@ class TPSTestRunner(object):
         logstr = "\n%s | %s%s\n" % (result[0], testname, (' | %s' % result[1] if result[1] else ''))
 
         try:
-            repoinfo = self.firefoxRunner.runner.get_repositoryInfo()
+            repoinfo = mozversion.get_version(self.binary)
         except:
             repoinfo = {}
         apprepo = repoinfo.get('application_repository', '')
@@ -337,11 +342,11 @@ class TPSTestRunner(object):
         if self.mobile:
             self.preferences.update({'services.sync.client.type' : 'mobile'})
 
-        # Set a dummy username to force the correct authentication type. For the
-        # old sync, the username is not allowed to contain a '@'.
-        dummy = {'fx_account': 'dummy@somewhere', 'sync_account': 'dummy'}
-        auth_type = self.config.get('auth_type', 'fx_account')
-        self.preferences.update({'services.sync.username': dummy[auth_type]})
+        # If we are using legacy Sync, then set a dummy username to force the
+        # correct authentication type. Without this pref set to a value
+        # without an '@' character, Sync will initialize for FxA.
+        if self.config.get('auth_type', 'fx_account') != "fx_account":
+            self.preferences.update({'services.sync.username': "dummy"})
 
         if self.debug:
             self.preferences.update(self.debug_preferences)
@@ -351,9 +356,11 @@ class TPSTestRunner(object):
         if os.access(self.logfile, os.F_OK):
             os.remove(self.logfile)
 
-        # Make a copy of the default env variables and preferences, and update
-        # them for custom settings
-        self.env = self.default_env.copy()
+        # Copy the system env variables, and update them for custom settings
+        self.env = os.environ.copy()
+        self.env.update(self.extra_env)
+
+        # Update preferences for custom settings
         self.update_preferences()
 
         # Acquire a lock to make sure no other threads are running tests
@@ -448,6 +455,9 @@ class TPSTestRunner(object):
                 self.numpassed += 1
             else:
                 self.numfailed += 1
+                if self.stop_on_error:
+                    print '\nTest failed with --stop-on-error specified; not running any more tests.\n'
+                    break
 
         self.mozhttpd.stop()
 

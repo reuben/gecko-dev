@@ -8,6 +8,7 @@
 #include "nsWyciwygChannel.h"
 #include "nsILoadGroup.h"
 #include "nsNetUtil.h"
+#include "nsNetCID.h"
 #include "LoadContextInfo.h"
 #include "nsICacheService.h" // only to initialize
 #include "nsICacheStorageService.h"
@@ -25,31 +26,29 @@
 #include "nsIURI.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/unused.h"
+#include "mozilla/BasePrincipal.h"
+#include "nsProxyRelease.h"
+#include "nsContentSecurityManager.h"
+#include "nsContentUtils.h"
 
 typedef mozilla::net::LoadContextInfo LoadContextInfo;
 
 // Must release mChannel on the main thread
 class nsWyciwygAsyncEvent : public nsRunnable {
 public:
-  nsWyciwygAsyncEvent(nsWyciwygChannel *aChannel) : mChannel(aChannel) {}
+  explicit nsWyciwygAsyncEvent(nsWyciwygChannel *aChannel) : mChannel(aChannel) {}
 
   ~nsWyciwygAsyncEvent()
   {
-    nsCOMPtr<nsIThread> thread = do_GetMainThread();
-    NS_WARN_IF_FALSE(thread, "Couldn't get the main thread!");
-    if (thread) {
-      nsIWyciwygChannel *chan = static_cast<nsIWyciwygChannel *>(mChannel);
-      mozilla::unused << mChannel.forget();
-      NS_ProxyRelease(thread, chan);
-    }
+    NS_ReleaseOnMainThread(mChannel.forget());
   }
 protected:
-  nsRefPtr<nsWyciwygChannel> mChannel;
+  RefPtr<nsWyciwygChannel> mChannel;
 };
 
 class nsWyciwygSetCharsetandSourceEvent : public nsWyciwygAsyncEvent {
 public:
-  nsWyciwygSetCharsetandSourceEvent(nsWyciwygChannel *aChannel)
+  explicit nsWyciwygSetCharsetandSourceEvent(nsWyciwygChannel *aChannel)
     : nsWyciwygAsyncEvent(aChannel) {}
 
   NS_IMETHOD Run()
@@ -97,14 +96,15 @@ nsWyciwygChannel::nsWyciwygChannel()
     mNeedToWriteCharset(false),
     mCharsetSource(kCharsetUninitialized),
     mContentLength(-1),
-    mLoadFlags(LOAD_NORMAL),
-    mAppId(NECKO_NO_APP_ID),
-    mInBrowser(false)
+    mLoadFlags(LOAD_NORMAL)
 {
 }
 
 nsWyciwygChannel::~nsWyciwygChannel() 
 {
+  if (mLoadInfo) {
+    NS_ReleaseOnMainThread(mLoadInfo.forget(), false);
+  }
 }
 
 NS_IMPL_ISUPPORTS(nsWyciwygChannel,
@@ -221,8 +221,9 @@ nsWyciwygChannel::SetLoadGroup(nsILoadGroup* aLoadGroup)
                                 mLoadGroup,
                                 NS_GET_IID(nsIProgressEventSink),
                                 getter_AddRefs(mProgressSink));
-  mPrivateBrowsing = NS_UsePrivateBrowsing(this);
-  NS_GetAppInfo(this, &mAppId, &mInBrowser);
+  UpdatePrivateBrowsing();
+  NS_GetOriginAttributes(this, mOriginAttributes);
+
   return NS_OK;
 }
 
@@ -271,10 +272,7 @@ nsWyciwygChannel::GetURI(nsIURI* *aURI)
 NS_IMETHODIMP
 nsWyciwygChannel::GetOwner(nsISupports **aOwner)
 {
-  NS_PRECONDITION(mOwner, "Must have a principal!");
-  NS_ENSURE_STATE(mOwner);
-
-  NS_ADDREF(*aOwner = mOwner);
+  NS_IF_ADDREF(*aOwner = mOwner);
   return NS_OK;
 }
 
@@ -282,6 +280,20 @@ NS_IMETHODIMP
 nsWyciwygChannel::SetOwner(nsISupports* aOwner)
 {
   mOwner = aOwner;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWyciwygChannel::GetLoadInfo(nsILoadInfo **aLoadInfo)
+{
+  NS_IF_ADDREF(*aLoadInfo = mLoadInfo);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWyciwygChannel::SetLoadInfo(nsILoadInfo* aLoadInfo)
+{
+  mLoadInfo = aLoadInfo;
   return NS_OK;
 }
 
@@ -306,8 +318,8 @@ nsWyciwygChannel::SetNotificationCallbacks(nsIInterfaceRequestor* aNotificationC
                                 NS_GET_IID(nsIProgressEventSink),
                                 getter_AddRefs(mProgressSink));
 
-  mPrivateBrowsing = NS_UsePrivateBrowsing(this);
-  NS_GetAppInfo(this, &mAppId, &mInBrowser);
+  UpdatePrivateBrowsing();
+  NS_GetOriginAttributes(this, mOriginAttributes);
 
   return NS_OK;
 }
@@ -398,8 +410,24 @@ nsWyciwygChannel::Open(nsIInputStream ** aReturn)
 }
 
 NS_IMETHODIMP
+nsWyciwygChannel::Open2(nsIInputStream** aStream)
+{
+  nsCOMPtr<nsIStreamListener> listener;
+  nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return Open(aStream);
+}
+
+NS_IMETHODIMP
 nsWyciwygChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
 {
+  MOZ_ASSERT(!mLoadInfo ||
+             mLoadInfo->GetSecurityMode() == 0 ||
+             mLoadInfo->GetInitialSecurityCheckDone() ||
+             (mLoadInfo->GetSecurityMode() == nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
+              nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
+             "security flags in loadInfo but asyncOpen2() not called");
+
   LOG(("nsWyciwygChannel::AsyncOpen [this=%p]\n", this));
   MOZ_ASSERT(mMode == NONE, "nsWyciwygChannel already open");
 
@@ -431,6 +459,15 @@ nsWyciwygChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
     mLoadGroup->AddRequest(this, nullptr);
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWyciwygChannel::AsyncOpen2(nsIStreamListener *aListener)
+{
+  nsCOMPtr<nsIStreamListener> listener = aListener;
+  nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return AsyncOpen(listener, nullptr);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -688,9 +725,9 @@ nsWyciwygChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctx,
   rv = mListener->OnDataAvailable(this, mListenerContext, input, offset, count);
 
   // XXX handle 64-bit stuff for real
-  if (mProgressSink && NS_SUCCEEDED(rv) && !(mLoadFlags & LOAD_BACKGROUND))
-    mProgressSink->OnProgress(this, nullptr, offset + count,
-                              uint64_t(mContentLength));
+  if (mProgressSink && NS_SUCCEEDED(rv)) {
+    mProgressSink->OnProgress(this, nullptr, offset + count, mContentLength);
+  }
 
   return rv; // let the pump cancel on failure
 }
@@ -751,8 +788,8 @@ nsWyciwygChannel::OpenCacheEntry(nsIURI *aURI,
   NS_ENSURE_SUCCESS(rv, rv);
 
   bool anonymous = mLoadFlags & LOAD_ANONYMOUS;
-  nsRefPtr<LoadContextInfo> loadInfo = mozilla::net::GetLoadContextInfo(
-    mPrivateBrowsing, mAppId, mInBrowser, anonymous);
+  RefPtr<LoadContextInfo> loadInfo = mozilla::net::GetLoadContextInfo(
+    mPrivateBrowsing, anonymous, mOriginAttributes);
 
   nsCOMPtr<nsICacheStorage> cacheStorage;
   if (mLoadFlags & INHIBIT_PERSISTENT_CACHING)

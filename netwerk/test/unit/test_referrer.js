@@ -1,10 +1,14 @@
-var ios = Cc["@mozilla.org/network/io-service;1"].
-    getService(Ci.nsIIOService);
+Cu.import("resource://gre/modules/NetUtil.jsm");
 
 function getTestReferrer(server_uri, referer_uri) {
-  var chan = ios.newChannel(server_uri, "", null);
+  var uri = NetUtil.newURI(server_uri, "", null)
+  var chan = NetUtil.newChannel({
+    uri: uri,
+    loadUsingSystemPrincipal: true
+  });
+
   chan.QueryInterface(Components.interfaces.nsIHttpChannel);
-  chan.referrer = ios.newURI(referer_uri, null, null);
+  chan.referrer = NetUtil.newURI(referer_uri, null, null);
   var header = null;
   try {
     header = chan.getRequestHeader("Referer");

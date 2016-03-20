@@ -1,4 +1,5 @@
-/* vim:set ts=2 sw=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,7 +13,7 @@
 
 #include <stdio.h>
 
-#ifdef XP_WIN
+#if defined(_MSC_VER) && _MSC_VER < 1900
 #define snprintf _snprintf
 #endif
 
@@ -521,7 +522,7 @@ nsAString::AppendInt(int aInt, int32_t aRadix)
     default:
       NS_ERROR("Unrecognized radix");
       fmt = "";
-  };
+  }
 
   char buf[20];
   int len = snprintf(buf, sizeof(buf), fmt, aInt);
@@ -1001,7 +1002,7 @@ nsACString::AppendInt(int aInt, int32_t aRadix)
     default:
       NS_ERROR("Unrecognized radix");
       fmt = "";
-  };
+  }
 
   char buf[20];
   int len = snprintf(buf, sizeof(buf), fmt, aInt);
@@ -1158,7 +1159,8 @@ CompressWhitespace(nsAString& aString)
   char16_t* start;
   uint32_t len = NS_StringGetMutableData(aString, UINT32_MAX, &start);
   char16_t* end = start + len;
-  char16_t* from = start, *to = start;
+  char16_t* from = start;
+  char16_t* to = start;
 
   // Skip any leading whitespace
   while (from < end && NS_IsAsciiWhitespace(*from)) {
@@ -1306,3 +1308,5 @@ ParseString(const nsACString& aSource, char aDelimiter,
 
   return true;
 }
+
+#undef snprintf

@@ -4,11 +4,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import mozfile
 import mozhttpd
 import urllib2
 import os
 import unittest
-import re
 import json
 import tempfile
 
@@ -64,7 +64,7 @@ class ApiTest(unittest.TestCase):
         try:
             f = urllib2.urlopen(self.get_url('/api/resource/', server_port, querystr),
                                 data=json.dumps(postdata))
-        except urllib2.HTTPError, e:
+        except urllib2.HTTPError as e:
             # python 2.4
             self.assertEqual(e.code, 201)
             body = e.fp.read()
@@ -120,11 +120,10 @@ class ApiTest(unittest.TestCase):
         self.try_del(server_port, '?foo=bar')
 
         # GET: By default we don't serve any files if we just define an API
-        f = None
         exception_thrown = False
         try:
-            f = urllib2.urlopen(self.get_url('/', server_port, None))
-        except urllib2.HTTPError, e:
+            urllib2.urlopen(self.get_url('/', server_port, None))
+        except urllib2.HTTPError as e:
             self.assertEqual(e.code, 404)
             exception_thrown = True
         self.assertTrue(exception_thrown)
@@ -137,36 +136,33 @@ class ApiTest(unittest.TestCase):
         server_port = httpd.httpd.server_port
 
         # GET: Return 404 for non-existent endpoint
-        f = None
         exception_thrown = False
         try:
-            f = urllib2.urlopen(self.get_url('/api/resource/', server_port, None))
-        except urllib2.HTTPError, e:
+            urllib2.urlopen(self.get_url('/api/resource/', server_port, None))
+        except urllib2.HTTPError as e:
             self.assertEqual(e.code, 404)
             exception_thrown = True
         self.assertTrue(exception_thrown)
 
         # POST: POST should also return 404
-        f = None
         exception_thrown = False
         try:
-            f = urllib2.urlopen(self.get_url('/api/resource/', server_port, None),
+            urllib2.urlopen(self.get_url('/api/resource/', server_port, None),
                             data=json.dumps({}))
-        except urllib2.HTTPError, e:
+        except urllib2.HTTPError as e:
             self.assertEqual(e.code, 404)
             exception_thrown = True
         self.assertTrue(exception_thrown)
 
         # DEL: DEL should also return 404
-        f = None
         exception_thrown = False
         try:
             opener = urllib2.build_opener(urllib2.HTTPHandler)
             request = urllib2.Request(self.get_url('/api/resource/', server_port,
                                                    None))
             request.get_method = lambda: 'DEL'
-            f = opener.open(request)
-        except urllib2.HTTPError, e:
+            opener.open(request)
+        except urllib2.HTTPError:
             self.assertEqual(e.code, 404)
             exception_thrown = True
         self.assertTrue(exception_thrown)
@@ -199,6 +195,7 @@ class ProxyTest(unittest.TestCase):
 
     def test_proxy(self):
         docroot = tempfile.mkdtemp()
+        self.addCleanup(mozfile.remove, docroot)
         hosts = ('mozilla.com', 'mozilla.org')
         unproxied_host = 'notmozilla.org'
         def url(host): return 'http://%s/' % host
@@ -255,7 +252,7 @@ class ProxyTest(unittest.TestCase):
         exc = None
         try:
             urllib2.urlopen(url(unproxied_host))
-        except urllib2.HTTPError, e:
+        except urllib2.HTTPError as e:
             exc = e
         self.assertNotEqual(exc, None)
         self.assertEqual(exc.code, 404)

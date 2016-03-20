@@ -24,7 +24,7 @@ namespace mozilla {
 namespace ctypes {
 
 static char*
-UnicodeToNative(JSContext *cx, const jschar *source, size_t slen)
+UnicodeToNative(JSContext *cx, const char16_t *source, size_t slen)
 {
   nsAutoCString native;
   nsDependentString unicode(reinterpret_cast<const char16_t*>(source), slen);
@@ -128,8 +128,8 @@ Module::Call(nsIXPConnectWrappedNative* wrapper,
   return NS_OK;
 }
 
-}
-}
+} // namespace ctypes
+} // namespace mozilla
 
 NS_DEFINE_NAMED_CID(JSCTYPES_CID);
 

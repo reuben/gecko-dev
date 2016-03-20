@@ -4,18 +4,27 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['test']
-
 # Public stuff.
 EXPORTS.mozilla.dom += [
+    'FileReaderSync.h',
+    'ServiceWorkerCommon.h',
     'ServiceWorkerContainer.h',
+    'ServiceWorkerEvents.h',
+    'ServiceWorkerMessageEvent.h',
+    'ServiceWorkerRegistrar.h',
+    'ServiceWorkerRegistration.h',
+    'WorkerLocation.h',
+    'WorkerNavigator.h',
+    'WorkerPrefs.h',
     'WorkerPrivate.h',
     'WorkerRunnable.h',
     'WorkerScope.h',
 ]
 
 EXPORTS.mozilla.dom.workers += [
+    'RuntimeService.h',
     'ServiceWorkerManager.h',
+    'WorkerDebuggerManager.h',
     'Workers.h',
 ]
 
@@ -23,11 +32,11 @@ EXPORTS.mozilla.dom.workers += [
 EXPORTS.mozilla.dom.workers.bindings += [
     'DataStore.h',
     'DataStoreCursor.h',
-    'FileReaderSync.h',
-    'Location.h',
-    'MessagePort.h',
-    'Navigator.h',
+    'Performance.h',
     'ServiceWorker.h',
+    'ServiceWorkerClient.h',
+    'ServiceWorkerClients.h',
+    'ServiceWorkerWindowClient.h',
     'SharedWorker.h',
     'URL.h',
     'WorkerFeature.h',
@@ -35,44 +44,89 @@ EXPORTS.mozilla.dom.workers.bindings += [
     'XMLHttpRequestUpload.h',
 ]
 
-SOURCES += [
+XPIDL_MODULE = 'dom_workers'
+
+XPIDL_SOURCES += [
+    'nsIWorkerDebugger.idl',
+    'nsIWorkerDebuggerManager.idl',
+]
+
+UNIFIED_SOURCES += [
     'ChromeWorkerScope.cpp',
     'DataStore.cpp',
     'DataStoreCursor.cpp',
-    'File.cpp',
     'FileReaderSync.cpp',
-    'Location.cpp',
-    'MessagePort.cpp',
-    'Navigator.cpp',
+    'Performance.cpp',
     'Principal.cpp',
     'RegisterBindings.cpp',
     'RuntimeService.cpp',
     'ScriptLoader.cpp',
     'ServiceWorker.cpp',
+    'ServiceWorkerClient.cpp',
+    'ServiceWorkerClients.cpp',
     'ServiceWorkerContainer.cpp',
     'ServiceWorkerEvents.cpp',
     'ServiceWorkerManager.cpp',
+    'ServiceWorkerManagerChild.cpp',
+    'ServiceWorkerManagerParent.cpp',
+    'ServiceWorkerManagerService.cpp',
+    'ServiceWorkerMessageEvent.cpp',
+    'ServiceWorkerPrivate.cpp',
+    'ServiceWorkerRegistrar.cpp',
+    'ServiceWorkerRegistration.cpp',
+    'ServiceWorkerScriptCache.cpp',
+    'ServiceWorkerWindowClient.cpp',
     'SharedWorker.cpp',
     'URL.cpp',
+    'WorkerDebuggerManager.cpp',
+    'WorkerLocation.cpp',
+    'WorkerNavigator.cpp',
     'WorkerPrivate.cpp',
     'WorkerRunnable.cpp',
     'WorkerScope.cpp',
+    'WorkerThread.cpp',
     'XMLHttpRequest.cpp',
     'XMLHttpRequestUpload.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
-
-MSVC_ENABLE_PGO = True
+IPDL_SOURCES += [
+    'PServiceWorkerManager.ipdl',
+    'ServiceWorkerRegistrarTypes.ipdlh',
+]
 
 LOCAL_INCLUDES += [
     '../base',
     '../system',
-    '/content/base/src',
+    '/dom/base',
     '/xpcom/build',
     '/xpcom/threads',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
-FINAL_LIBRARY = 'gklayout'
+FINAL_LIBRARY = 'xul'
+
+TEST_DIRS += [
+    'test/extensions/bootstrap',
+    'test/extensions/traditional',
+]
+
+MOCHITEST_MANIFESTS += [
+    'test/mochitest.ini',
+    'test/serviceworkers/mochitest.ini',
+]
+
+MOCHITEST_CHROME_MANIFESTS += [
+    'test/chrome.ini',
+    'test/serviceworkers/chrome.ini'
+]
+
+BROWSER_CHROME_MANIFESTS += [
+    'test/serviceworkers/browser.ini',
+]
+
+XPCSHELL_TESTS_MANIFESTS += ['test/xpcshell/xpcshell.ini']
+
+BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
+
+TEST_DIRS += ['test/gtest']

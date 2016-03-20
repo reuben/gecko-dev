@@ -13,9 +13,8 @@
 #include "nsRefreshDriver.h"
 
 class nsIContent;
-class nsIScrollbarOwner;
+class nsIScrollbarMediator;
 class nsITimer;
-class nsIAtom;
 
 namespace mozilla {
 namespace layout {
@@ -55,10 +54,11 @@ namespace layout {
  * ActivityStarted().
  */
 
-class ScrollbarActivity : public nsIDOMEventListener,
-                          public nsARefreshObserver {
+class ScrollbarActivity final : public nsIDOMEventListener,
+                                public nsARefreshObserver
+{
 public:
-  ScrollbarActivity(nsIScrollbarOwner* aScrollableFrame)
+  explicit ScrollbarActivity(nsIScrollbarMediator* aScrollableFrame)
    : mScrollableFrame(aScrollableFrame)
    , mNestedActivityCounter(0)
    , mIsActive(false)
@@ -83,10 +83,10 @@ public:
   void ActivityStarted();
   void ActivityStopped();
 
-  virtual void WillRefresh(TimeStamp aTime) MOZ_OVERRIDE;
+  virtual void WillRefresh(TimeStamp aTime) override;
 
   static void FadeBeginTimerFired(nsITimer* aTimer, void* aSelf) {
-    nsRefPtr<ScrollbarActivity> scrollbarActivity(
+    RefPtr<ScrollbarActivity> scrollbarActivity(
       reinterpret_cast<ScrollbarActivity*>(aSelf));
     scrollbarActivity->BeginFade();
   }
@@ -135,7 +135,7 @@ protected:
     return TimeDuration::FromMilliseconds(mScrollbarFadeDuration);
   }
 
-  nsIScrollbarOwner* mScrollableFrame;
+  nsIScrollbarMediator* mScrollableFrame;
   TimeStamp mFadeBeginTime;
   nsCOMPtr<nsITimer> mFadeBeginTimer;
   nsCOMPtr<nsIDOMEventTarget> mHorizontalScrollbar; // null while inactive

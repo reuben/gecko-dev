@@ -5,6 +5,7 @@
 #include "signtool.h"
 #include "prio.h"
 #include "prmem.h"
+#include "prenv.h"
 #include "nss.h"
 
 static int	is_dir (char *filename);
@@ -16,9 +17,11 @@ static int	is_dir (char *filename);
 long	*mozilla_event_queue = 0;
 
 #ifndef XP_WIN
-char	*XP_GetString (int i)
+char *XP_GetString (int i)
 {
-    return SECU_Strerror (i);
+    /* nasty hackish cast to avoid changing the signature of
+     * JAR_init_callbacks() */
+    return (char *)SECU_Strerror (i);
 }
 #endif
 
@@ -979,7 +982,7 @@ char	*get_default_cert_dir (void)
     static char	db [FNSIZE];
 
 #ifdef XP_UNIX
-    home = getenv ("HOME");
+    home = PR_GetEnvSecure ("HOME");
 
     if (home && *home) {
 	sprintf (db, "%s/.netscape", home);
@@ -992,7 +995,7 @@ char	*get_default_cert_dir (void)
 
     /* first check the environment override */
 
-    home = getenv ("JAR_HOME");
+    home = PR_GetEnvSecure ("JAR_HOME");
 
     if (home && *home) {
 	sprintf (db, "%s/cert7.db", home);

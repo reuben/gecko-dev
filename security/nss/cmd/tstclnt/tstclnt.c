@@ -32,6 +32,7 @@
 #include "ssl.h"
 #include "sslproto.h"
 #include "pk11func.h"
+#include "secmod.h"
 #include "plgetopt.h"
 #include "plstr.h"
 
@@ -97,6 +98,7 @@ int ssl3CipherSuites[] = {
 
 unsigned long __cmp_umuls;
 PRBool verbose;
+int dumpServerChain = 0;
 int renegotiationsToDo = 0;
 int renegotiationsDone = 0;
 
@@ -108,6 +110,7 @@ void printSecurityInfo(PRFileDesc *fd)
 {
     CERTCertificate * cert;
     const SECItemArray *csa;
+    const SECItem *scts;
     SSL3Statistics * ssl3stats = SSL_GetStatistics();
     SECStatus result;
     SSLChannelInfo    channel;
@@ -127,10 +130,11 @@ void printSecurityInfo(PRFileDesc *fd)
 	       suite.macBits, suite.macAlgorithmName);
 	    FPRINTF(stderr, 
 	    "tstclnt: Server Auth: %d-bit %s, Key Exchange: %d-bit %s\n"
-	    "         Compression: %s\n",
+            "         Compression: %s, Extended Master Secret: %s\n",
 	       channel.authKeyBits, suite.authAlgorithmName,
 	       channel.keaKeyBits,  suite.keaTypeName,
-	       channel.compressionMethodName);
+               channel.compressionMethodName,
+               channel.extendedMasterSecretUsed ? "Yes": "No");
     	}
     }
     cert = SSL_RevealCert(fd);
@@ -159,6 +163,11 @@ void printSecurityInfo(PRFileDesc *fd)
         fprintf(stderr, "Received %d Cert Status items (OCSP stapled data)\n",
                 csa->len);
     }
+    scts = SSL_PeerSignedCertTimestamps(fd);
+    if (scts && scts->len) {
+        fprintf(stderr, "Received a Signed Certificate Timestamp of length"
+                " %u\n", scts->len);
+    }
 }
 
 void
@@ -179,8 +188,9 @@ static void PrintUsageHeader(const char *progName)
 {
     fprintf(stderr, 
 "Usage:  %s -h host [-a 1st_hs_name ] [-a 2nd_hs_name ] [-p port]\n"
-                    "[-d certdir] [-n nickname] [-Bafosvx] [-c ciphers] [-Y]\n"
-                    "[-V [min-version]:[max-version]] [-T]\n"
+                    "[-D | -d certdir] [-C] [-b | -R root-module] \n"
+		    "[-n nickname] [-Bafosvx] [-c ciphers] [-Y]\n"
+                    "[-V [min-version]:[max-version]] [-K] [-T] [-U]\n"
                     "[-r N] [-w passwd] [-W pwfile] [-q [-t seconds]]\n", 
             progName);
 }
@@ -196,6 +206,12 @@ static void PrintParameterUsage(void)
     fprintf(stderr, 
             "%-20s Directory with cert database (default is ~/.netscape)\n",
 	    "-d certdir");
+    fprintf(stderr, "%-20s Run without a cert database\n", "-D");
+    fprintf(stderr, "%-20s Load the default \"builtins\" root CA module\n", "-b");
+    fprintf(stderr, "%-20s Load the given root CA module\n", "-R");
+    fprintf(stderr, "%-20s Print certificate chain information\n", "-C");
+    fprintf(stderr, "%-20s (use -C twice to print more certificate details)\n", "");
+    fprintf(stderr, "%-20s (use -C three times to include PEM format certificate dumps)\n", "");
     fprintf(stderr, "%-20s Nickname of key and cert for client auth\n", 
                     "-n nickname");
     fprintf(stderr, 
@@ -206,6 +222,7 @@ static void PrintParameterUsage(void)
             "%-20s Possible values for min/max: ssl2 ssl3 tls1.0 tls1.1 tls1.2\n"
             "%-20s Example: \"-V ssl3:\" enables SSL 3 and newer.\n",
             "-V [min]:[max]", "", "", "");
+    fprintf(stderr, "%-20s Send TLS_FALLBACK_SCSV\n", "-K");
     fprintf(stderr, "%-20s Prints only payload data. Skips HTTP header.\n", "-S");
     fprintf(stderr, "%-20s Client speaks first. \n", "-f");
     fprintf(stderr, "%-20s Use synchronous certificate validation "
@@ -221,6 +238,8 @@ static void PrintParameterUsage(void)
     fprintf(stderr, "%-20s Enable compression.\n", "-z");
     fprintf(stderr, "%-20s Enable false start.\n", "-g");
     fprintf(stderr, "%-20s Enable the cert_status extension (OCSP stapling).\n", "-T");
+    fprintf(stderr, "%-20s Enable the signed_certificate_timestamp extension.\n", "-U");
+    fprintf(stderr, "%-20s Enable the extended master secret extension (session hash).\n", "-G");
     fprintf(stderr, "%-20s Require fresh revocation info from side channel.\n"
                     "%-20s -F once means: require for server cert only\n"
                     "%-20s -F twice means: require for intermediates, too\n"
@@ -238,6 +257,7 @@ static void PrintParameterUsage(void)
     fprintf(stderr, "%-20s Enforce using an IPv4 destination address\n", "-4");
     fprintf(stderr, "%-20s Enforce using an IPv6 destination address\n", "-6");
     fprintf(stderr, "%-20s (Options -4 and -6 cannot be combined.)\n", "");
+    fprintf(stderr, "%-20s Enable the extended master secret extension [RFC7627]\n", "-G");
 }
 
 static void Usage(const char *progName)
@@ -499,15 +519,117 @@ verifyFromSideChannel(CERTCertificate *cert, ServerCertAuth *sca)
         EXIT_CODE_SIDECHANNELTEST_REVOKED;
 }
 
+
+static void
+dumpCertificatePEM(CERTCertificate *cert)
+{
+    SECItem data;
+    data.data = cert->derCert.data;
+    data.len = cert->derCert.len;
+    fprintf(stderr, "%s\n%s\n%s\n", NS_CERT_HEADER, 
+	    BTOA_DataToAscii(data.data, data.len), NS_CERT_TRAILER);
+}
+
+static void
+dumpServerCertificateChain(PRFileDesc *fd)
+{
+    CERTCertList *peerCertChain = NULL;
+    CERTCertListNode *node = NULL;
+    CERTCertificate *peerCert = NULL;
+    CERTCertificateList *foundChain = NULL;
+    SECU_PPFunc dumpFunction = NULL;
+    PRBool dumpCertPEM = PR_FALSE;
+
+    if (!dumpServerChain) {
+	return;
+    }
+    else if (dumpServerChain == 1) {
+	dumpFunction = (SECU_PPFunc)SECU_PrintCertificateBasicInfo;
+    } else {
+	dumpFunction = (SECU_PPFunc)SECU_PrintCertificate;
+	if (dumpServerChain > 2) {
+	    dumpCertPEM = PR_TRUE;
+	}
+    }
+
+    SECU_EnableWrap(PR_FALSE);
+
+    fprintf(stderr, "==== certificate(s) sent by server: ====\n");
+    peerCertChain = SSL_PeerCertificateChain(fd);
+    if (peerCertChain) {
+        node = CERT_LIST_HEAD(peerCertChain);
+        while ( ! CERT_LIST_END(node, peerCertChain) ) {
+            CERTCertificate *cert = node->cert;
+            SECU_PrintSignedContent(stderr, &cert->derCert, "Certificate", 0,
+                                    dumpFunction);
+	    if (dumpCertPEM) {
+		dumpCertificatePEM(cert);
+	    }
+            node = CERT_LIST_NEXT(node);   
+        }
+    }
+
+    if (peerCertChain) {
+	peerCert = SSL_RevealCert(fd);
+	if (peerCert) {
+	    foundChain = CERT_CertChainFromCert(peerCert, certificateUsageSSLServer,
+						PR_TRUE);
+	}
+	if (foundChain) {
+	    unsigned int count = 0;
+	    fprintf(stderr, "==== locally found issuer certificate(s): ====\n");
+	    for(count = 0; count < (unsigned int)foundChain->len; count++) {
+		CERTCertificate *c;
+		PRBool wasSentByServer = PR_FALSE;
+		c = CERT_FindCertByDERCert(CERT_GetDefaultCertDB(), &foundChain->certs[count]);
+
+		node = CERT_LIST_HEAD(peerCertChain);
+		while ( ! CERT_LIST_END(node, peerCertChain) ) {
+		    CERTCertificate *cert = node->cert;
+		    if (CERT_CompareCerts(cert, c)) {
+			wasSentByServer = PR_TRUE;
+			break;
+		    }
+		    node = CERT_LIST_NEXT(node);   
+		}
+		
+		if (!wasSentByServer) {
+		    SECU_PrintSignedContent(stderr, &c->derCert, "Certificate", 0,
+					    dumpFunction);
+		    if (dumpCertPEM) {
+			dumpCertificatePEM(c);
+		    }
+		}
+		CERT_DestroyCertificate(c);
+	    }
+	    CERT_DestroyCertificateList(foundChain);
+	}
+	if (peerCert) {
+	    CERT_DestroyCertificate(peerCert);
+	}
+
+	CERT_DestroyCertList(peerCertChain);
+	peerCertChain = NULL;
+    }
+
+    fprintf(stderr, "==== end of certificate chain information ====\n");
+    fflush(stderr);
+}
+
 static SECStatus 
 ownAuthCertificate(void *arg, PRFileDesc *fd, PRBool checkSig,
                        PRBool isServer)
 {
     ServerCertAuth * serverCertAuth = (ServerCertAuth *) arg;
 
+    if (dumpServerChain) {
+	dumpServerCertificateChain(fd);
+    }
+
+
     if (!serverCertAuth->shouldPause) {
         CERTCertificate *cert;
-        int i;
+        unsigned int i;
         const SECItemArray *csa;
 
         if (!serverCertAuth->testFreshStatusFromSideChannel) {
@@ -532,8 +654,7 @@ ownAuthCertificate(void *arg, PRFileDesc *fd, PRBool checkSig,
 		if (CERT_CacheOCSPResponseFromSideChannel(
 			serverCertAuth->dbHandle, cert, PR_Now(),
 			&csa->items[i], arg) != SECSuccess) {
-		    PRErrorCode error = PR_GetError();
-		    PORT_Assert(error != 0);
+		    PORT_Assert(PR_GetError() != 0);
 		}
             }
         }
@@ -807,6 +928,9 @@ int main(int argc, char **argv)
     int                enableCompression = 0;
     int                enableFalseStart = 0;
     int                enableCertStatus = 0;
+    int                enableSignedCertTimestamps = 0;
+    int                forceFallbackSCSV = 0;
+    int                enableExtendedMasterSecret = 0;
     PRSocketOptionData opt;
     PRNetAddr          addr;
     PRPollDesc         pollset[2];
@@ -826,6 +950,9 @@ int main(int argc, char **argv)
     PLOptState *optstate;
     PLOptStatus optstatus;
     PRStatus prStatus;
+    PRBool openDB = PR_TRUE;
+    PRBool loadDefaultRootCAs = PR_FALSE;
+    char *rootModule = NULL;
 
     serverCertAuth.shouldPause = PR_TRUE;
     serverCertAuth.isPaused = PR_FALSE;
@@ -841,7 +968,7 @@ int main(int argc, char **argv)
 	progName = strrchr(argv[0], '\\');
     progName = progName ? progName+1 : argv[0];
 
-    tmp = PR_GetEnv("NSS_DEBUG_TIMEOUT");
+    tmp = PR_GetEnvSecure("NSS_DEBUG_TIMEOUT");
     if (tmp && tmp[0]) {
        int sec = PORT_Atoi(tmp);
        if (sec > 0) {
@@ -852,7 +979,7 @@ int main(int argc, char **argv)
     SSL_VersionRangeGetSupported(ssl_variant_stream, &enabledVersions);
 
     optstate = PL_CreateOptState(argc, argv,
-                                 "46BFM:OSTV:W:Ya:c:d:fgh:m:n:op:qr:st:uvw:xz");
+                                 "46BCDFGKM:OR:STUV:W:Ya:bc:d:fgh:m:n:op:qr:st:uvw:xz");
     while ((optstatus = PL_GetNextOpt(optstate)) == PL_OPT_OK) {
 	switch (optstate->option) {
 	  case '?':
@@ -863,6 +990,10 @@ int main(int argc, char **argv)
 
           case 'B': bypassPKCS11 = 1; 			break;
 
+          case 'C': ++dumpServerChain; 			break;
+
+          case 'D': openDB = PR_FALSE; 			break;
+
           case 'F': if (serverCertAuth.testFreshStatusFromSideChannel) {
                         /* parameter given twice or more */
                         serverCertAuth.requireDataForIntermediates = PR_TRUE;
@@ -870,9 +1001,13 @@ int main(int argc, char **argv)
                     serverCertAuth.testFreshStatusFromSideChannel = PR_TRUE;
                     break;
 
+          case 'G': enableExtendedMasterSecret = PR_TRUE; break;
+
 	  case 'I': /* reserved for OCSP multi-stapling */ break;
 
           case 'O': serverCertAuth.shouldPause = PR_FALSE; break;
+
+          case 'K': forceFallbackSCSV = PR_TRUE; break;
 
           case 'M': switch (atoi(optstate->value)) {
                       case 1:
@@ -891,9 +1026,13 @@ int main(int argc, char **argv)
                     };
                     break;
 
+          case 'R': rootModule = PORT_Strdup(optstate->value); break;
+
           case 'S': skipProtoHeader = PR_TRUE;                 break;
 
           case 'T': enableCertStatus = 1;               break;
+
+          case 'U': enableSignedCertTimestamps = 1;               break;
 
           case 'V': if (SECU_ParseSSLVersionRangeString(optstate->value,
                             enabledVersions, enableSSL2,
@@ -912,6 +1051,8 @@ int main(int argc, char **argv)
                         Usage(progName);
                     }
                     break;
+
+          case 'b': loadDefaultRootCAs = PR_TRUE;                 break;
 
           case 'c': cipherString = PORT_Strdup(optstate->value); break;
 
@@ -968,12 +1109,24 @@ int main(int argc, char **argv)
     if (optstatus == PL_OPT_BAD)
 	Usage(progName);
 
-    if (!host || !portno) 
+    if (!host || !portno) {
+        fprintf(stderr, "%s: parameters -h and -p are mandatory\n", progName);
     	Usage(progName);
+    }
 
     if (serverCertAuth.testFreshStatusFromSideChannel
         && serverCertAuth.shouldPause) {
         fprintf(stderr, "%s: -F requires the use of -O\n", progName);
+        exit(1);
+    }
+
+    if (certDir && !openDB) {
+        fprintf(stderr, "%s: Cannot combine parameters -D and -d\n", progName);
+        exit(1);
+    }
+
+    if (rootModule && loadDefaultRootCAs) {
+        fprintf(stderr, "%s: Cannot combine parameters -b and -R\n", progName);
         exit(1);
     }
 
@@ -1069,10 +1222,26 @@ int main(int argc, char **argv)
         certDir = SECU_ConfigDirectory(certDirTmp);
         PORT_Free(certDirTmp);
     }
-    rv = NSS_Init(certDir);
-    if (rv != SECSuccess) {
-        SECU_PrintError(progName, "unable to open cert database");
-        return 1;
+
+    if (openDB) {
+	rv = NSS_Init(certDir);
+	if (rv != SECSuccess) {
+	    SECU_PrintError(progName, "unable to open cert database");
+	    return 1;
+	}
+    } else {
+	rv = NSS_NoDB_Init(NULL);
+	if (rv != SECSuccess) {
+	    SECU_PrintError(progName, "failed to initialize NSS");
+	    return 1;
+	}
+    }
+
+    if (loadDefaultRootCAs) {
+	SECMOD_AddNewModule("Builtins",
+			    DLL_PREFIX"nssckbi."DLL_SUFFIX, 0, 0);
+    } else if (rootModule) {
+	SECMOD_AddNewModule("Builtins", rootModule, 0, 0);
     }
 
     /* set the policy bits true for all the cipher suites. */
@@ -1129,7 +1298,7 @@ int main(int argc, char **argv)
 	    int  cipher;
 
 	    if (ndx == ':') {
-		int ctmp;
+		int ctmp = 0;
 
 		cipher = 0;
 		HEXCHAR_TO_INT(*cipherString, ctmp)
@@ -1218,10 +1387,35 @@ int main(int argc, char **argv)
 	return 1;
     }
 
+    if (forceFallbackSCSV) {
+        rv = SSL_OptionSet(s, SSL_ENABLE_FALLBACK_SCSV, PR_TRUE);
+        if (rv != SECSuccess) {
+            SECU_PrintError(progName, "error forcing fallback scsv");
+            return 1;
+        }
+    }
+
     /* enable cert status (OCSP stapling). */
     rv = SSL_OptionSet(s, SSL_ENABLE_OCSP_STAPLING, enableCertStatus);
     if (rv != SECSuccess) {
         SECU_PrintError(progName, "error enabling cert status (OCSP stapling)");
+        return 1;
+    }
+
+    /* enable extended master secret mode */
+    if  (enableExtendedMasterSecret) {
+        rv = SSL_OptionSet(s, SSL_ENABLE_EXTENDED_MASTER_SECRET, PR_TRUE);
+	if (rv != SECSuccess) {
+            SECU_PrintError(progName, "error enabling extended master secret");
+            return 1;
+	}
+    }
+
+    /* enable Signed Certificate Timestamps. */
+    rv = SSL_OptionSet(s, SSL_ENABLE_SIGNED_CERT_TIMESTAMPS,
+              enableSignedCertTimestamps);
+    if (rv != SECSuccess) {
+        SECU_PrintError(progName, "error enabling signed cert timestamps");
         return 1;
     }
 

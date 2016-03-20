@@ -5,23 +5,24 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 XPIDL_SOURCES += [
-    'nsIDOMMozMmsMessage.idl',
-    'nsIDOMMozMobileMessageThread.idl',
-    'nsIDOMMozSmsMessage.idl',
-    'nsIDOMSmsFilter.idl',
-    'nsIDOMSmsSegmentInfo.idl',
+    'nsIDeletedMessageInfo.idl',
+    'nsIMmsMessage.idl',
     'nsIMmsService.idl',
     'nsIMobileMessageCallback.idl',
     'nsIMobileMessageCursorCallback.idl',
     'nsIMobileMessageDatabaseService.idl',
     'nsIMobileMessageService.idl',
+    'nsIMobileMessageThread.idl',
+    'nsISmsMessage.idl',
     'nsISmsService.idl',
     'nsIWapPushApplication.idl',
 ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk' and CONFIG['MOZ_B2G_RIL']:
     XPIDL_SOURCES += [
-        'nsIRilMobileMessageDatabaseService.idl',
+        'nsIGonkMobileMessageDatabaseService.idl',
+        'nsIGonkSmsService.idl',
+        'nsISmsMessenger.idl',
     ]
 
 XPIDL_MODULE = 'dom_mobilemessage'

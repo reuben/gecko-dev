@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,6 +12,7 @@
 #include "nsError.h"
 #include "nsDebug.h"
 #include "nsISupportsImpl.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/TypeTraits.h"
 
 /**
@@ -30,11 +32,6 @@
   AddRef()
 
 
-extern "C++" {
-// ...because some one is accidentally including this file inside
-// an |extern "C"|
-
-
 // Making this a |inline| |template| allows |aExpr| to be evaluated only once,
 // yet still denies you the ability to |AddRef()| an |nsCOMPtr|.
 template<class T>
@@ -45,8 +42,6 @@ ns_if_addref(T aExpr)
     aExpr->AddRef();
   }
 }
-
-} /* extern "C++" */
 
 /**
  * Macro for adding a reference to an interface that checks for nullptr.
@@ -138,6 +133,13 @@ CallQueryInterface(T* aSource, DestinationType** aDestination)
 
   return aSource->QueryInterface(NS_GET_TEMPLATE_IID(DestinationType),
                                  reinterpret_cast<void**>(aDestination));
+}
+
+template <class SourceType, class DestinationType>
+inline nsresult
+CallQueryInterface(RefPtr<SourceType>& aSourcePtr, DestinationType** aDestPtr)
+{
+  return CallQueryInterface(aSourcePtr.get(), aDestPtr);
 }
 
 #endif /* __nsISupportsUtils_h */

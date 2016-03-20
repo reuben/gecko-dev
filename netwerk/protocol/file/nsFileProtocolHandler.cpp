@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsIFile.h"
 #include "nsFileProtocolHandler.h"
 #include "nsFileChannel.h"
 #include "nsStandardURL.h"
@@ -177,7 +178,9 @@ nsFileProtocolHandler::NewURI(const nsACString &spec,
 }
 
 NS_IMETHODIMP
-nsFileProtocolHandler::NewChannel(nsIURI *uri, nsIChannel **result)
+nsFileProtocolHandler::NewChannel2(nsIURI* uri,
+                                   nsILoadInfo* aLoadInfo,
+                                   nsIChannel** result)
 {
     nsFileChannel *chan = new nsFileChannel(uri);
     if (!chan)
@@ -190,8 +193,21 @@ nsFileProtocolHandler::NewChannel(nsIURI *uri, nsIChannel **result)
         return rv;
     }
 
+    // set the loadInfo on the new channel
+    rv = chan->SetLoadInfo(aLoadInfo);
+    if (NS_FAILED(rv)) {
+        NS_RELEASE(chan);
+        return rv;
+    }
+
     *result = chan;
     return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFileProtocolHandler::NewChannel(nsIURI *uri, nsIChannel **result)
+{
+    return NewChannel2(uri, nullptr, result);
 }
 
 NS_IMETHODIMP 

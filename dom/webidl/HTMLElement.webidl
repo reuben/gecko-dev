@@ -22,14 +22,17 @@ interface HTMLElement : Element {
   [Constant]
   readonly attribute DOMStringMap dataset;
 
+  [GetterThrows, Pure]
+           attribute DOMString innerText;
+
   // microdata 
   [SetterThrows, Pure]
            attribute boolean itemScope;
-  [PutForwards=value,Constant] readonly attribute DOMSettableTokenList itemType;
+  [PutForwards=value,Constant] readonly attribute DOMTokenList itemType;
   [SetterThrows, Pure]
            attribute DOMString itemId;
-  [PutForwards=value,Constant] readonly attribute DOMSettableTokenList itemRef;
-  [PutForwards=value,Constant] readonly attribute DOMSettableTokenList itemProp;
+  [PutForwards=value,Constant] readonly attribute DOMTokenList itemRef;
+  [PutForwards=value,Constant] readonly attribute DOMTokenList itemProp;
   [Constant]
   readonly attribute HTMLPropertiesCollection properties;
   [Throws]
@@ -51,7 +54,7 @@ interface HTMLElement : Element {
   readonly attribute DOMString accessKeyLabel;
   [SetterThrows, Pure]
            attribute boolean draggable;
-  //[PutForwards=value] readonly attribute DOMSettableTokenList dropzone;
+  //[PutForwards=value] readonly attribute DOMTokenList dropzone;
   [SetterThrows, Pure]
            attribute DOMString contentEditable;
   [Pure]
@@ -76,10 +79,6 @@ interface HTMLElement : Element {
   readonly attribute CSSStyleDeclaration style;
 
   // Mozilla specific stuff
-  // FIXME Bug 810677 Move className from HTMLElement to Element
-  [Pure]
-           attribute DOMString className;
-
            attribute EventHandler oncopy;
            attribute EventHandler oncut;
            attribute EventHandler onpaste;
@@ -110,10 +109,6 @@ interface TouchEventHandlers {
            attribute EventHandler ontouchend;
   [Func="nsGenericHTMLElement::TouchEventsEnabled"]
            attribute EventHandler ontouchmove;
-  [Func="nsGenericHTMLElement::TouchEventsEnabled"]
-           attribute EventHandler ontouchenter;
-  [Func="nsGenericHTMLElement::TouchEventsEnabled"]
-           attribute EventHandler ontouchleave;
   [Func="nsGenericHTMLElement::TouchEventsEnabled"]
            attribute EventHandler ontouchcancel;
 };

@@ -24,10 +24,9 @@ sys.path.insert(0, os.path.abspath(os.pardir))
 
 # Add any Sphinx extension module names here, as strings. They can be extensions
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
-extensions = ['sphinx.ext.autodoc']
+extensions = ['sphinx.ext.autodoc', 'sphinx.ext.extlinks']
 
 # Add any paths that contain templates here, relative to this directory.
-## FIXME: disabled for now because I haven't figured out how to use this:
 #templates_path = ['_templates']
 
 # The suffix of source filenames.
@@ -74,6 +73,11 @@ unused_docs = []
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
 
+extlinks = {
+    'issue': ('https://github.com/pypa/virtualenv/issues/%s', '#'),
+    'pull': ('https://github.com/pypa/virtualenv/pull/%s', 'PR #'),
+}
+
 
 # Options for HTML output
 # -----------------------
@@ -83,13 +87,14 @@ pygments_style = 'sphinx'
 # given in html_static_path.
 #html_style = 'default.css'
 
-if os.environ.get('DOCS_LOCAL'):
-    import sphinx_rtd_theme
-    html_theme = "sphinx_rtd_theme"
-    html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
-else:
-    # on RTD
-    html_theme = 'default'
+html_theme = 'default'
+if not on_rtd:
+    try:
+        import sphinx_rtd_theme
+        html_theme = 'sphinx_rtd_theme'
+        html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+    except ImportError:
+        pass
 
 
 # Add any paths that contain custom static files (such as style sheets) here,

@@ -13,6 +13,7 @@
 #include "nsIGfxInfo.h"
 #include "nsIPersistentProperties2.h"
 #include "nsServiceManagerUtils.h"
+#include "mozilla/Services.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -28,7 +29,7 @@ ApplicationAccessibleWrap::NativeAttributes()
   nsCOMPtr<nsIPersistentProperties> attributes =
     do_CreateInstance(NS_PERSISTENTPROPERTIES_CONTRACTID);
 
-  nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
+  nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
   if (gfxInfo) {
     bool isD2DEnabled = false;
     gfxInfo->GetD2DEnabled(&isD2DEnabled);
@@ -79,10 +80,7 @@ ApplicationAccessibleWrap::get_appName(BSTR* aName)
     return CO_E_OBJNOTCONNECTED;
 
   nsAutoString name;
-  nsresult rv = GetAppName(name);
-  if (NS_FAILED(rv))
-    return GetHRESULT(rv);
-
+  AppName(name);
   if (name.IsEmpty())
     return S_FALSE;
 
@@ -106,10 +104,7 @@ ApplicationAccessibleWrap::get_appVersion(BSTR* aVersion)
     return CO_E_OBJNOTCONNECTED;
 
   nsAutoString version;
-  nsresult rv = GetAppVersion(version);
-  if (NS_FAILED(rv))
-    return GetHRESULT(rv);
-
+  AppVersion(version);
   if (version.IsEmpty())
     return S_FALSE;
 
@@ -131,10 +126,7 @@ ApplicationAccessibleWrap::get_toolkitName(BSTR* aName)
     return CO_E_OBJNOTCONNECTED;
 
   nsAutoString name;
-  nsresult rv = GetPlatformName(name);
-  if (NS_FAILED(rv))
-    return GetHRESULT(rv);
-
+  PlatformName(name);
   if (name.IsEmpty())
     return S_FALSE;
 
@@ -158,10 +150,7 @@ ApplicationAccessibleWrap::get_toolkitVersion(BSTR* aVersion)
     return CO_E_OBJNOTCONNECTED;
 
   nsAutoString version;
-  nsresult rv = GetPlatformVersion(version);
-  if (NS_FAILED(rv))
-    return GetHRESULT(rv);
-
+  PlatformVersion(version);
   if (version.IsEmpty())
     return S_FALSE;
 

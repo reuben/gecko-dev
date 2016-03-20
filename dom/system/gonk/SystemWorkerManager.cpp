@@ -27,18 +27,14 @@
 #include "AutoMounter.h"
 #include "TimeZoneSettingObserver.h"
 #include "AudioManager.h"
+#include "mozilla/dom/ScriptSettings.h"
 #ifdef MOZ_B2G_RIL
 #include "mozilla/ipc/Ril.h"
 #endif
-#ifdef MOZ_NFC
-#include "mozilla/ipc/Nfc.h"
-#endif
 #include "mozilla/ipc/KeyStore.h"
 #include "nsIObserverService.h"
-#include "nsCxPusher.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
-#include "nsRadioInterfaceLayer.h"
 #include "WifiWorker.h"
 #include "mozilla/Services.h"
 
@@ -55,7 +51,7 @@ NS_DEFINE_CID(kWifiWorkerCID, NS_WIFIWORKER_CID);
 // Doesn't carry a reference, we're owned by services.
 SystemWorkerManager *gInstance = nullptr;
 
-} // anonymous namespace
+} // namespace
 
 SystemWorkerManager::SystemWorkerManager()
   : mShutdown(false)
@@ -75,22 +71,20 @@ SystemWorkerManager::~SystemWorkerManager()
 nsresult
 SystemWorkerManager::Init()
 {
-  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+  if (!XRE_IsParentProcess()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
   NS_ASSERTION(NS_IsMainThread(), "We can only initialize on the main thread");
   NS_ASSERTION(!mShutdown, "Already shutdown!");
 
-  mozilla::AutoSafeJSContext cx;
-
-  nsresult rv = InitWifi(cx);
+  nsresult rv = InitWifi();
   if (NS_FAILED(rv)) {
     NS_WARNING("Failed to initialize WiFi Networking!");
     return rv;
   }
 
-  InitKeyStore(cx);
+  InitKeyStore();
 
   InitAutoMounter();
   InitializeTimeZoneSettingObserver();
@@ -122,11 +116,7 @@ SystemWorkerManager::Shutdown()
   ShutdownAutoMounter();
 
 #ifdef MOZ_B2G_RIL
-  RilConsumer::Shutdown();
-#endif
-
-#ifdef MOZ_NFC
-  NfcConsumer::Shutdown();
+  RilWorker::Shutdown();
 #endif
 
   nsCOMPtr<nsIWifi> wifi(do_QueryInterface(mWifiWorker));
@@ -135,6 +125,11 @@ SystemWorkerManager::Shutdown()
     wifi = nullptr;
   }
   mWifiWorker = nullptr;
+
+  if (mKeyStore) {
+    mKeyStore->Shutdown();
+    mKeyStore = nullptr;
+  }
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
@@ -148,7 +143,7 @@ SystemWorkerManager::FactoryCreate()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  nsRefPtr<SystemWorkerManager> instance(gInstance);
+  RefPtr<SystemWorkerManager> instance(gInstance);
 
   if (!instance) {
     instance = new SystemWorkerManager();
@@ -203,34 +198,12 @@ SystemWorkerManager::RegisterRilWorker(unsigned int aClientId,
     return NS_ERROR_FAILURE;
   }
 
-  return RilConsumer::Register(aClientId, wctd);
+  return RilWorker::Register(aClientId, wctd);
 #endif // MOZ_B2G_RIL
 }
 
 nsresult
-SystemWorkerManager::RegisterNfcWorker(JS::Handle<JS::Value> aWorker,
-                                       JSContext* aCx)
-{
-#ifndef MOZ_NFC
-  return NS_ERROR_NOT_IMPLEMENTED;
-#else
-  NS_ENSURE_TRUE(aWorker.isObject(), NS_ERROR_UNEXPECTED);
-
-  JSAutoCompartment ac(aCx, &aWorker.toObject());
-
-  WorkerCrossThreadDispatcher* wctd =
-    GetWorkerCrossThreadDispatcher(aCx, aWorker);
-  if (!wctd) {
-    NS_WARNING("Failed to GetWorkerCrossThreadDispatcher for nfc");
-    return NS_ERROR_FAILURE;
-  }
-
-  return NfcConsumer::Register(wctd);
-#endif // MOZ_NFC
-}
-
-nsresult
-SystemWorkerManager::InitWifi(JSContext *cx)
+SystemWorkerManager::InitWifi()
 {
   nsCOMPtr<nsIWorkerHolder> worker = do_CreateInstance(kWifiWorkerCID);
   NS_ENSURE_TRUE(worker, NS_ERROR_FAILURE);
@@ -240,7 +213,7 @@ SystemWorkerManager::InitWifi(JSContext *cx)
 }
 
 nsresult
-SystemWorkerManager::InitKeyStore(JSContext *cx)
+SystemWorkerManager::InitKeyStore()
 {
   mKeyStore = new KeyStore();
   return NS_OK;

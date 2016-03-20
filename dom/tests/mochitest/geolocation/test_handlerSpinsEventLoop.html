@@ -26,6 +26,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=911595
  */
 
 SimpleTest.waitForExplicitFinish();
+SimpleTest.requestFlakyTimeout("untriaged");
 
 resume_geolocationProvider(function() {
   force_prompt(true, test1);
@@ -37,7 +38,7 @@ function spinEventLoopAndSetTimeout() {
     return;
   }
 
-  window.showModalDialog("javascript:window.close()");
+  SpecialPowers.spinEventLoop(window);
 
   setTimeout(function() {
     ok(successCallbackCalled != errorCallbackCalled, "Ensure only one callback is called");

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -23,6 +24,8 @@
 #define READ_BINARYMODE "r"
 #endif
 
+using namespace mozilla;
+
 #ifdef XP_WIN
 inline FILE*
 TS_tfopen(const char* aPath, const wchar_t* aMode)
@@ -45,7 +48,7 @@ TS_tfopen(const char* aPath, const char* aMode)
 class AutoFILE
 {
 public:
-  AutoFILE(FILE* aFp = nullptr) : fp_(aFp) {}
+  explicit AutoFILE(FILE* aFp = nullptr) : fp_(aFp) {}
   ~AutoFILE()
   {
     if (fp_) {
@@ -94,7 +97,7 @@ nsresult
 nsINIParser::Init(const char* aPath)
 {
   /* open the file */
-  AutoFILE fd = TS_tfopen(aPath, READ_BINARYMODE);
+  AutoFILE fd(TS_tfopen(aPath, READ_BINARYMODE));
   if (!fd) {
     return NS_ERROR_FAILURE;
   }
@@ -116,12 +119,13 @@ nsINIParser::InitFromFILE(FILE* aFd)
   }
 
   long flen = ftell(aFd);
-  if (flen == 0) {
+  /* zero-sized file, or an error */
+  if (flen <= 0) {
     return NS_ERROR_FAILURE;
   }
 
   /* malloc an internal buf the size of the file */
-  mFileContents = new char[flen + 2];
+  mFileContents = MakeUnique<char[]>(flen + 2);
   if (!mFileContents) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -131,7 +135,7 @@ nsINIParser::InitFromFILE(FILE* aFd)
     return NS_BASE_STREAM_OSERROR;
   }
 
-  int rd = fread(mFileContents, sizeof(char), flen, aFd);
+  int rd = fread(mFileContents.get(), sizeof(char), flen, aFd);
   if (rd != flen) {
     return NS_BASE_STREAM_OSERROR;
   }
@@ -142,9 +146,9 @@ nsINIParser::InitFromFILE(FILE* aFd)
   char* buffer = &mFileContents[0];
 
   if (flen >= 3 &&
-      mFileContents[0] == static_cast<char>(0xEF) &&
-      mFileContents[1] == static_cast<char>(0xBB) &&
-      mFileContents[2] == static_cast<char>(0xBF)) {
+      mFileContents[0] == '\xEF' &&
+      mFileContents[1] == '\xBB' &&
+      mFileContents[2] == '\xBF') {
     // Someone set us up the Utf-8 BOM
     // This case is easy, since we assume that BOM-less
     // files are Utf-8 anyway.  Just skip the BOM and process as usual.
@@ -153,8 +157,8 @@ nsINIParser::InitFromFILE(FILE* aFd)
 
 #ifdef XP_WIN
   if (flen >= 2 &&
-      mFileContents[0] == static_cast<char>(0xFF) &&
-      mFileContents[1] == static_cast<char>(0xFE)) {
+      mFileContents[0] == '\xFF' &&
+      mFileContents[1] == '\xFE') {
     // Someone set us up the Utf-16LE BOM
     buffer = &mFileContents[2];
     // Get the size required for our Utf8 buffer
@@ -170,13 +174,13 @@ nsINIParser::InitFromFILE(FILE* aFd)
       return NS_ERROR_FAILURE;
     }
 
-    nsAutoArrayPtr<char> utf8Buffer(new char[flen]);
+    UniquePtr<char[]> utf8Buffer(new char[flen]);
     if (WideCharToMultiByte(CP_UTF8, 0, reinterpret_cast<LPWSTR>(buffer), -1,
-                            utf8Buffer, flen, nullptr, nullptr) == 0) {
+                            utf8Buffer.get(), flen, nullptr, nullptr) == 0) {
       return NS_ERROR_FAILURE;
     }
-    mFileContents = utf8Buffer.forget();
-    buffer = mFileContents;
+    mFileContents = Move(utf8Buffer);
+    buffer = mFileContents.get();
   }
 #endif
 
@@ -240,13 +244,13 @@ nsINIParser::InitFromFILE(FILE* aFd)
         break;
       }
       if (!v->next) {
-        v->next = new INIValue(key, token);
+        v->next = MakeUnique<INIValue>(key, token);
         if (!v->next) {
           return NS_ERROR_OUT_OF_MEMORY;
         }
         break;
       }
-      v = v->next;
+      v = v->next.get();
     }
     NS_ASSERTION(v, "v should never be null coming out of this loop");
   }
@@ -267,7 +271,7 @@ nsINIParser::GetString(const char* aSection, const char* aKey,
       return NS_OK;
     }
 
-    val = val->next;
+    val = val->next.get();
   }
 
   return NS_ERROR_FAILURE;
@@ -291,30 +295,20 @@ nsINIParser::GetString(const char* aSection, const char* aKey,
       return NS_OK;
     }
 
-    val = val->next;
+    val = val->next.get();
   }
 
   return NS_ERROR_FAILURE;
 }
 
-PLDHashOperator
-nsINIParser::GetSectionsCB(const char* aKey, INIValue* aData,
-                           void* aClosure)
-{
-  GSClosureStruct* cs = reinterpret_cast<GSClosureStruct*>(aClosure);
-
-  return cs->usercb(aKey, cs->userclosure) ? PL_DHASH_NEXT : PL_DHASH_STOP;
-}
-
 nsresult
 nsINIParser::GetSections(INISectionCallback aCB, void* aClosure)
 {
-  GSClosureStruct gs = {
-    aCB,
-    aClosure
-  };
-
-  mSections.EnumerateRead(GetSectionsCB, &gs);
+  for (auto iter = mSections.Iter(); !iter.Done(); iter.Next()) {
+    if (!aCB(iter.Key(), aClosure)) {
+      break;
+    }
+  }
   return NS_OK;
 }
 
@@ -326,7 +320,7 @@ nsINIParser::GetStrings(const char* aSection,
 
   for (mSections.Get(aSection, &val);
        val;
-       val = val->next) {
+       val = val->next.get()) {
 
     if (!aCB(val->key, val->value, aClosure)) {
       return NS_OK;

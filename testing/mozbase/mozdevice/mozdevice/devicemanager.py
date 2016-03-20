@@ -4,15 +4,14 @@
 
 import hashlib
 import mozlog
+import logging
 import os
-import ntpath
 import posixpath
 import re
 import struct
 import StringIO
 import zlib
 
-from Zeroconf import Zeroconf, ServiceBrowser
 from functools import wraps
 
 class DMError(Exception):
@@ -47,12 +46,30 @@ class DeviceManager(object):
     """
 
     _logcatNeedsRoot = True
+    default_timeout = 300
+    short_timeout = 30
 
-    def __init__(self, logLevel=mozlog.ERROR):
-        self._logger = mozlog.getLogger("DeviceManager")
+    def __init__(self, logLevel=None, deviceRoot=None):
+        try:
+            self._logger = mozlog.get_default_logger(component="mozdevice")
+            if not self._logger: # no global structured logger, fall back to reg logging
+                self._logger = mozlog.unstructured.getLogger("mozdevice")
+                if logLevel is not None:
+                    self._logger.setLevel(logLevel)
+        except AttributeError:
+            # Structured logging doesn't work on Python 2.6
+            self._logger = None
         self._logLevel = logLevel
-        self._logger.setLevel(logLevel)
         self._remoteIsWin = None
+        self._isDeviceRootSetup = False
+        self._deviceRoot = deviceRoot
+
+    def _log(self, data):
+        """
+        This helper function is called by ProcessHandler to log
+        the output produced by processes
+        """
+        self._logger.debug(data)
 
     @property
     def remoteIsWin(self):
@@ -71,17 +88,17 @@ class DeviceManager(object):
 
     @property
     def debug(self):
-        self._logger.warn("dm.debug is deprecated. Use logLevel.")
-        levels = {mozlog.DEBUG: 5, mozlog.INFO: 3, mozlog.WARNING: 2,
-                  mozlog.ERROR: 1, mozlog.CRITICAL: 0}
+        self._logger.warning("dm.debug is deprecated. Use logLevel.")
+        levels = {logging.DEBUG: 5, logging.INFO: 3, logging.WARNING: 2,
+                  logging.ERROR: 1, logging.CRITICAL: 0}
         return levels[self.logLevel]
 
     @debug.setter
     def debug_setter(self, newDebug):
-        self._logger.warn("dm.debug is deprecated. Use logLevel.")
+        self._logger.warning("dm.debug is deprecated. Use logLevel.")
         newDebug = 5 if newDebug > 5 else newDebug # truncate >=5 to 5
-        levels = {5: mozlog.DEBUG, 3: mozlog.INFO, 2: mozlog.WARNING,
-                  1: mozlog.ERROR, 0: mozlog.CRITICAL}
+        levels = {5: logging.DEBUG, 3: logging.INFO, 2: logging.WARNING,
+                  1: logging.ERROR, 0: logging.CRITICAL}
         self.logLevel = levels[newDebug]
 
     @abstractmethod
@@ -98,6 +115,7 @@ class DeviceManager(object):
           - `systime` - system time of the device
           - `screen` - screen resolution
           - `memory` - memory stats
+          - `memtotal` - total memory available on the device, for example 927208 kB
           - `process` - list of running processes (same as ps)
           - `disk` - total, free, available bytes on disk
           - `power` - power status (charge, battery temp)
@@ -118,7 +136,8 @@ class DeviceManager(object):
         """
         for interface in interfaces:
             match = re.match(r"%s: ip (\S+)" % interface,
-                             self.shellCheckOutput(['ifconfig', interface]))
+                             self.shellCheckOutput(['ifconfig', interface],
+                             timeout=self.short_timeout))
             if match:
                 return match.group(1)
 
@@ -129,7 +148,8 @@ class DeviceManager(object):
         #TODO: spawn this off in a separate thread/process so we can collect all the logcat information
 
         # Right now this is just clearing the logcat so we can only see what happens after this call.
-        self.shellCheckOutput(['/system/bin/logcat', '-c'], root=self._logcatNeedsRoot)
+        self.shellCheckOutput(['/system/bin/logcat', '-c'], root=self._logcatNeedsRoot,
+                              timeout=self.short_timeout)
 
     def getLogcat(self, filterSpecs=["dalvikvm:I", "ConnectivityService:S",
                                       "WifiMonitor:S", "WifiStateTracker:S",
@@ -137,11 +157,14 @@ class DeviceManager(object):
                   format="time",
                   filterOutRegexps=[]):
         """
-        Returns the contents of the logcat file as a list of strings
+        Returns the contents of the logcat file as a list of
+        '\n' terminated strings
         """
         cmdline = ["/system/bin/logcat", "-v", format, "-d"] + filterSpecs
-        lines = self.shellCheckOutput(cmdline,
-                                      root=self._logcatNeedsRoot).split('\r')
+        output = self.shellCheckOutput(cmdline,
+                                      root=self._logcatNeedsRoot,
+                                      timeout=self.short_timeout)
+        lines = output.replace('\r\n', '\n').splitlines(True)
 
         for regex in filterOutRegexps:
             lines = [line for line in lines if not re.search(regex, line)]
@@ -164,7 +187,7 @@ class DeviceManager(object):
         with open(filename, 'w') as pngfile:
             # newer versions of screencap can write directly to a png, but some
             # older versions can't
-            tempScreenshotFile = self.getDeviceRoot() + "/ss-dm.tmp"
+            tempScreenshotFile = self.deviceRoot + "/ss-dm.tmp"
             self.shellCheckOutput(["sh", "-c", "%s > %s" %
                                    (screencap, tempScreenshotFile)],
                                   root=True)
@@ -313,55 +336,34 @@ class DeviceManager(object):
         Recursively changes file permissions in a directory.
         """
 
+    @property
+    def deviceRoot(self):
+        """
+        The device root on the device filesystem for putting temporary
+        testing files.
+        """
+        # derive deviceroot value if not set
+        if not self._deviceRoot or not self._isDeviceRootSetup:
+            self._deviceRoot = self._setupDeviceRoot(self._deviceRoot)
+            self._isDeviceRootSetup = True
+
+        return self._deviceRoot
+
     @abstractmethod
+    def _setupDeviceRoot(self):
+        """
+        Sets up and returns a device root location that can be written to by tests.
+        """
+
     def getDeviceRoot(self):
         """
-        Gets the device root for the testing area on the device.
+        Get the device root on the device filesystem for putting temporary
+        testing files.
 
-        For all devices we will use / type slashes and depend on the device-agent
-        to sort those out.  The agent will return us the device location where we
-        should store things, we will then create our /tests structure relative to
-        that returned path.
-
-        Structure on the device is as follows:
-
-        ::
-
-          /tests
-              /<fennec>|<firefox>  --> approot
-              /profile
-              /xpcshell
-              /reftest
-              /mochitest
+        .. deprecated:: 0.38
+          Use the :py:attr:`deviceRoot` property instead.
         """
-
-    @abstractmethod
-    def getAppRoot(self, packageName=None):
-        """
-        Returns the app root directory.
-
-        E.g /tests/fennec or /tests/firefox
-        """
-        # TODO Support org.mozilla.firefox and B2G
-
-    def getTestRoot(self, harnessName):
-        """
-        Gets the directory location on the device for a specific test type.
-
-        :param harnessName: one of: "xpcshell", "reftest", "mochitest"
-        """
-
-        devroot = self.getDeviceRoot()
-        if (devroot == None):
-            return None
-
-        if (re.search('xpcshell', harnessName, re.I)):
-            self.testRoot = devroot + '/xpcshell'
-        elif (re.search('?(i)reftest', harnessName)):
-            self.testRoot = devroot + '/reftest'
-        elif (re.search('?(i)mochitest', harnessName)):
-            self.testRoot = devroot + '/mochitest'
-        return self.testRoot
+        return self.deviceRoot
 
     @abstractmethod
     def getTempDir(self):
@@ -411,14 +413,16 @@ class DeviceManager(object):
         Format of tuples is (processId, processName, userId)
         """
 
-    def processExist(self, processName):
+    def processInfo(self, processName):
         """
-        Returns True if process with name processName is running on device.
+        Returns information on the process with processName.
+        Information on process is in tuple format: (pid, process path, user)
+        If a process with the specified name does not exist this function will return None.
         """
         if not isinstance(processName, basestring):
             raise TypeError("Process name %s is not a string" % processName)
 
-        pid = None
+        processInfo = None
 
         #filter out extra spaces
         parts = filter(lambda x: x != '', processName.split(' '))
@@ -441,10 +445,17 @@ class DeviceManager(object):
         for proc in procList:
             procName = proc[1].split('/')[-1]
             if (procName == app):
-                pid = proc[0]
+                processInfo = proc
                 break
-        return pid
+        return processInfo
 
+    def processExist(self, processName):
+        """
+        Returns True if process with name processName is running on device.
+        """
+        processInfo = self.processInfo(processName)
+        if processInfo:
+            return processInfo[0]
 
     @abstractmethod
     def killProcess(self, processName, sig=None):

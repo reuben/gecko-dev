@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -15,12 +15,7 @@
 
 class nsWeakReference;
 
-// Set IMETHOD_VISIBILITY to empty so that the class-level NS_COM declaration
-// controls member method visibility.
-#undef  IMETHOD_VISIBILITY
-#define IMETHOD_VISIBILITY NS_COM_GLUE
-
-class NS_COM_GLUE nsSupportsWeakReference : public nsISupportsWeakReference
+class nsSupportsWeakReference : public nsISupportsWeakReference
 {
 public:
   nsSupportsWeakReference() : mProxy(0) {}
@@ -36,16 +31,13 @@ private:
   // Called (only) by an |nsWeakReference| from _its_ dtor.
   void NoticeProxyDestruction() { mProxy = 0; }
 
-  nsWeakReference* mProxy;
+  nsWeakReference* MOZ_NON_OWNING_REF mProxy;
 
 protected:
 
   void ClearWeakReferences();
   bool HasWeakReferences() const { return mProxy != 0; }
 };
-
-#undef  IMETHOD_VISIBILITY
-#define IMETHOD_VISIBILITY
 
 inline
 nsSupportsWeakReference::~nsSupportsWeakReference()

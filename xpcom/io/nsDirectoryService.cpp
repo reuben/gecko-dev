@@ -76,19 +76,16 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
   }
 
   if (dirService) {
-    nsCOMPtr <nsIFile> aLocalFile;
-    dirService->Get(NS_XPCOM_INIT_CURRENT_PROCESS_DIR, NS_GET_IID(nsIFile), getter_AddRefs(aLocalFile));
-    if (aLocalFile) {
-      *aFile = aLocalFile;
-      NS_ADDREF(*aFile);
+    nsCOMPtr<nsIFile> localFile;
+    dirService->Get(NS_XPCOM_INIT_CURRENT_PROCESS_DIR, NS_GET_IID(nsIFile),
+                    getter_AddRefs(localFile));
+    if (localFile) {
+      localFile.forget(aFile);
       return NS_OK;
     }
   }
 
-  nsLocalFile* localFile = new nsLocalFile;
-  if (localFile == nullptr)
-    return NS_ERROR_OUT_OF_MEMORY;
-  NS_ADDREF(localFile);
+  RefPtr<nsLocalFile> localFile = new nsLocalFile;
 
 #ifdef XP_WIN
   wchar_t buf[MAX_PATH + 1];
@@ -102,7 +99,7 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
     }
 
     localFile->InitWithPath(nsDependentString(buf));
-    *aFile = localFile;
+    localFile.forget(aFile);
     return NS_OK;
   }
 
@@ -126,7 +123,7 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
 #endif
           rv = localFile->InitWithNativePath(nsDependentCString(buffer));
           if (NS_SUCCEEDED(rv)) {
-            *aFile = localFile;
+            localFile.forget(aFile);
           }
         }
         CFRelease(parentURL);
@@ -168,7 +165,7 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
   if (moz5 && *moz5) {
     if (realpath(moz5, buf)) {
       localFile->InitWithNativePath(nsDependentCString(buf));
-      *aFile = localFile;
+      localFile.forget(aFile);
       return NS_OK;
     }
   }
@@ -185,13 +182,11 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
   // Fall back to current directory.
   if (getcwd(buf, sizeof(buf))) {
     localFile->InitWithNativePath(nsDependentCString(buf));
-    *aFile = localFile;
+    localFile.forget(aFile);
     return NS_OK;
   }
 
 #endif
-
-  NS_RELEASE(localFile);
 
   NS_ERROR("unable to get current process directory");
   return NS_ERROR_FAILURE;
@@ -200,7 +195,7 @@ nsDirectoryService::GetCurrentProcessDirectory(nsIFile** aFile)
 nsDirectoryService* nsDirectoryService::gService = nullptr;
 
 nsDirectoryService::nsDirectoryService()
-  : mHashtable(256)
+  : mHashtable(128)
 {
 }
 
@@ -248,7 +243,7 @@ nsDirectoryService::RealInit()
   NS_ASSERTION(!gService,
                "nsDirectoryService::RealInit Mustn't initialize twice!");
 
-  nsRefPtr<nsDirectoryService> self = new nsDirectoryService();
+  RefPtr<nsDirectoryService> self = new nsDirectoryService();
 
   NS_RegisterStaticAtoms(directory_atoms);
 
@@ -292,7 +287,7 @@ nsDirectoryService::GetKeys(uint32_t* aCount, char*** aKeys)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-struct FileData
+struct MOZ_STACK_CLASS FileData
 {
   FileData(const char* aProperty, const nsIID& aUUID)
     : property(aProperty)
@@ -303,7 +298,7 @@ struct FileData
   }
 
   const char*   property;
-  nsISupports*  data;
+  nsCOMPtr<nsISupports> data;
   bool          persistent;
   const nsIID&  uuid;
 };
@@ -323,13 +318,13 @@ FindProviderFile(nsIDirectoryServiceProvider* aElement, FileData* aData)
           nsCOMPtr<nsISimpleEnumerator> unionFiles;
 
           NS_NewUnionEnumerator(getter_AddRefs(unionFiles),
-                                (nsISimpleEnumerator*)aData->data, newFiles);
+                                (nsISimpleEnumerator*)aData->data.get(), newFiles);
 
           if (unionFiles) {
             unionFiles.swap(*(nsISimpleEnumerator**)&aData->data);
           }
         } else {
-          NS_ADDREF(aData->data = newFiles);
+          aData->data = newFiles;
         }
 
         aData->persistent = false; // Enumerators can never be persistent
@@ -374,20 +369,20 @@ nsDirectoryService::Get(const char* aProp, const nsIID& aUuid, void** aResult)
   }
   if (fileData.data) {
     if (fileData.persistent) {
-      Set(aProp, static_cast<nsIFile*>(fileData.data));
+      Set(aProp, static_cast<nsIFile*>(fileData.data.get()));
     }
     nsresult rv = (fileData.data)->QueryInterface(aUuid, aResult);
-    NS_RELEASE(fileData.data);  // addref occurs in FindProviderFile()
+    fileData.data = nullptr; // AddRef occurs in FindProviderFile()
     return rv;
   }
 
   FindProviderFile(static_cast<nsIDirectoryServiceProvider*>(this), &fileData);
   if (fileData.data) {
     if (fileData.persistent) {
-      Set(aProp, static_cast<nsIFile*>(fileData.data));
+      Set(aProp, static_cast<nsIFile*>(fileData.data.get()));
     }
     nsresult rv = (fileData.data)->QueryInterface(aUuid, aResult);
-    NS_RELEASE(fileData.data);  // addref occurs in FindProviderFile()
+    fileData.data = nullptr; // AddRef occurs in FindProviderFile()
     return rv;
   }
 
@@ -474,7 +469,8 @@ nsDirectoryService::RegisterCategoryProviders()
     strings->GetNext(entry);
 
     nsXPIDLCString contractID;
-    catman->GetCategoryEntry(XPCOM_DIRECTORY_PROVIDER_CATEGORY, entry.get(), getter_Copies(contractID));
+    catman->GetCategoryEntry(XPCOM_DIRECTORY_PROVIDER_CATEGORY, entry.get(),
+                             getter_Copies(contractID));
 
     if (contractID) {
       nsCOMPtr<nsIDirectoryServiceProvider> provider = do_GetService(contractID.get());
@@ -495,6 +491,27 @@ nsDirectoryService::UnregisterProvider(nsIDirectoryServiceProvider* aProv)
   mProviders.RemoveElement(aProv);
   return NS_OK;
 }
+
+#if defined(MOZ_CONTENT_SANDBOX) && defined(XP_WIN)
+static nsresult
+GetLowIntegrityTempBase(nsIFile** aLowIntegrityTempBase)
+{
+  nsCOMPtr<nsIFile> localFile;
+  nsresult rv = GetSpecialSystemDirectory(Win_LocalAppdataLow,
+                                          getter_AddRefs(localFile));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = localFile->Append(NS_LITERAL_STRING(MOZ_USER_DIR));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  localFile.forget(aLowIntegrityTempBase);
+  return rv;
+}
+#endif
 
 // DO NOT ADD ANY LOCATIONS TO THIS FUNCTION UNTIL YOU TALK TO: dougt@netscape.com.
 // This is meant to be a place of xpcom or system specific file locations, not
@@ -522,7 +539,8 @@ nsDirectoryService::GetFile(const char* aProp, bool* aPersistent,
 
   // Unless otherwise set, the core pieces of the GRE exist
   // in the current process directory.
-  else if (inAtom == nsDirectoryService::sGRE_Directory) {
+  else if (inAtom == nsDirectoryService::sGRE_Directory ||
+           inAtom == nsDirectoryService::sGRE_BinDirectory) {
     rv = GetCurrentProcessDirectory(getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sOS_DriveDirectory) {
     rv = GetSpecialSystemDirectory(OS_DriveDirectory, getter_AddRefs(localFile));
@@ -668,6 +686,12 @@ nsDirectoryService::GetFile(const char* aProp, bool* aPersistent,
     rv = GetSpecialSystemDirectory(Win_Appdata, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sLocalAppdata) {
     rv = GetSpecialSystemDirectory(Win_LocalAppdata, getter_AddRefs(localFile));
+#if defined(MOZ_CONTENT_SANDBOX)
+  } else if (inAtom == nsDirectoryService::sLocalAppdataLow) {
+    rv = GetSpecialSystemDirectory(Win_LocalAppdataLow, getter_AddRefs(localFile));
+  } else if (inAtom == nsDirectoryService::sLowIntegrityTempBase) {
+    rv = GetLowIntegrityTempBase(getter_AddRefs(localFile));
+#endif
   } else if (inAtom == nsDirectoryService::sPrinthood) {
     rv = GetSpecialSystemDirectory(Win_Printhood, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sWinCookiesDirectory) {

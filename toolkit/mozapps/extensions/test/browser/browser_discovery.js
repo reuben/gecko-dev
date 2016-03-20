@@ -576,7 +576,7 @@ add_test(function() {
   });
 });
 
-// Test for Bug 601442 - extensions.getAddons.showPane need to be update 
+// Test for Bug 601442 - extensions.getAddons.showPane need to be update
 // for the new addon manager.
 function bug_601442_test_elements(visible) {
   open_manager("addons://list/extension", function(aWindow) {
@@ -619,4 +619,19 @@ add_test(function() {
   Services.prefs.setBoolPref(PREF_DISCOVER_ENABLED, true);
   Services.prefs.setBoolPref(PREF_XPI_ENABLED, true);
   bug_601442_test_elements(true);
+});
+
+// Test for Bug 1132971 - if extensions.getAddons.showPane is false,
+// the extensions pane should show by default
+add_test(function() {
+  Services.prefs.clearUserPref(PREF_UI_LASTCATEGORY);
+  Services.prefs.setBoolPref(PREF_DISCOVER_ENABLED, false);
+
+  open_manager(null, function(aWindow) {
+    gManagerWindow = aWindow;
+    gCategoryUtilities = new CategoryUtilities(gManagerWindow);
+    is(gCategoryUtilities.selectedCategory, "extension", "Should be showing the extension view");
+    close_manager(gManagerWindow, run_next_test);
+    Services.prefs.clearUserPref(PREF_DISCOVER_ENABLED);
+  });
 });

@@ -5,7 +5,7 @@
 
 Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://gre/modules/TelemetryLog.jsm");
-let bsp = Cu.import("resource:///modules/experiments/Experiments.jsm");
+var bsp = Cu.import("resource:///modules/experiments/Experiments.jsm");
 
 
 const FILE_MANIFEST            = "experiments.manifest";
@@ -15,18 +15,17 @@ const SEC_IN_ONE_DAY  = 24 * 60 * 60;
 const MS_IN_ONE_DAY   = SEC_IN_ONE_DAY * 1000;
 
 
-let gProfileDir          = null;
-let gHttpServer          = null;
-let gHttpRoot            = null;
-let gDataRoot            = null;
-let gReporter            = null;
-let gPolicy              = null;
-let gManifestObject      = null;
-let gManifestHandlerURI  = null;
+var gProfileDir          = null;
+var gHttpServer          = null;
+var gHttpRoot            = null;
+var gDataRoot            = null;
+var gPolicy              = null;
+var gManifestObject      = null;
+var gManifestHandlerURI  = null;
 
 const TLOG = bsp.TELEMETRY_LOG;
 
-let gGlobalScope = this;
+var gGlobalScope = this;
 function loadAddonManager() {
   let ns = {};
   Cu.import("resource://gre/modules/Services.jsm", ns);
@@ -78,24 +77,16 @@ add_task(function* test_setup() {
   });
   do_register_cleanup(() => gHttpServer.stop(() => {}));
 
-  disableCertificateChecks();
-
   Services.prefs.setBoolPref(PREF_EXPERIMENTS_ENABLED, true);
   Services.prefs.setIntPref(PREF_LOGGING_LEVEL, 0);
   Services.prefs.setBoolPref(PREF_LOGGING_DUMP, true);
   Services.prefs.setCharPref(PREF_MANIFEST_URI, gManifestHandlerURI);
   Services.prefs.setIntPref(PREF_FETCHINTERVAL, 0);
 
-  gReporter = yield getReporter("json_payload_simple");
-  yield gReporter.collectMeasurements();
-  let payload = yield gReporter.getJSONPayload(false);
-  do_register_cleanup(() => gReporter._shutdown());
-
   gPolicy = new Experiments.Policy();
   let dummyTimer = { cancel: () => {}, clear: () => {} };
   patchPolicy(gPolicy, {
     updatechannel: () => "nightly",
-    healthReportPayload: () => Promise.resolve(payload),
     oneshotTimer: (callback, timeout, thisObj, name) => dummyTimer,
   });
 
@@ -105,8 +96,8 @@ add_task(function* test_setup() {
 // Test basic starting and stopping of experiments.
 
 add_task(function* test_telemetryBasics() {
-  // Check TelemetryLog instead of TelemetryPing.getPayload().log because
-  // TelemetryPing gets Experiments.instance() and side-effects log entries.
+  // Check TelemetryLog instead of TelemetrySession.getPayload().log because
+  // TelemetrySession gets Experiments.instance() and side-effects log entries.
 
   const OBSERVER_TOPIC = "experiments-changed";
   let observerFireCount = 0;
@@ -330,6 +321,6 @@ add_task(function* test_telemetryBasics() {
 
   // Cleanup.
 
-  yield experiments.uninit();
+  yield promiseRestartManager();
   yield removeCacheFile();
 });

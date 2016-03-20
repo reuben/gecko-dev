@@ -24,13 +24,27 @@
 #endif
 
 class nsIInputStream;
-struct nsIntRect;
 class nsPluginDOMContextMenuListener;
-class nsObjectFrame;
+class nsPluginFrame;
 class nsDisplayListBuilder;
 
+#if defined(MOZ_X11) || defined(ANDROID)
+class gfxContext;
+#endif
+
+namespace mozilla {
+class TextComposition;
+namespace dom {
+struct MozPluginParameter;
+} // namespace dom
+namespace widget {
+class PuppetWidget;
+} // namespace widget
+} // namespace mozilla
+
+using mozilla::widget::PuppetWidget;
+
 #ifdef MOZ_X11
-class gfxXlibSurface;
 #ifdef MOZ_WIDGET_QT
 #include "gfxQtNativeRenderer.h"
 #else
@@ -38,12 +52,14 @@ class gfxXlibSurface;
 #endif
 #endif
 
-class nsPluginInstanceOwner : public nsIPluginInstanceOwner,
-                              public nsIDOMEventListener,
-                              public nsIPrivacyTransitionObserver,
-                              public nsSupportsWeakReference
+class nsPluginInstanceOwner final : public nsIPluginInstanceOwner,
+                                    public nsIDOMEventListener,
+                                    public nsIPrivacyTransitionObserver,
+                                    public nsSupportsWeakReference
 {
 public:
+  typedef mozilla::gfx::DrawTarget DrawTarget;
+
   nsPluginInstanceOwner();
   
   NS_DECL_ISUPPORTS
@@ -52,19 +68,16 @@ public:
   
   NS_IMETHOD GetURL(const char *aURL, const char *aTarget,
                     nsIInputStream *aPostStream, 
-                    void *aHeadersData, uint32_t aHeadersDataLen) MOZ_OVERRIDE;
-  
-  NS_IMETHOD ShowStatus(const char16_t *aStatusMsg) MOZ_OVERRIDE;
-  
-  NPError    ShowNativeContextMenu(NPMenu* menu, void* event) MOZ_OVERRIDE;
+                    void *aHeadersData, uint32_t aHeadersDataLen,
+                    bool aDoCheckLoadURIChecks) override;
   
   NPBool     ConvertPoint(double sourceX, double sourceY, NPCoordinateSpace sourceSpace,
-                          double *destX, double *destY, NPCoordinateSpace destSpace) MOZ_OVERRIDE;
-  
-  virtual NPError InitAsyncSurface(NPSize *size, NPImageFormat format,
-                                   void *initData, NPAsyncSurface *surface) MOZ_OVERRIDE;
-  virtual NPError FinalizeAsyncSurface(NPAsyncSurface *surface) MOZ_OVERRIDE;
-  virtual void SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect *changed) MOZ_OVERRIDE;
+                          double *destX, double *destY, NPCoordinateSpace destSpace) override;
+
+  NPError InitAsyncSurface(NPSize *size, NPImageFormat format,
+                           void *initData, NPAsyncSurface *surface) override;
+  NPError FinalizeAsyncSurface(NPAsyncSurface *surface) override;
+  void SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect *changed) override;
 
   /**
    * Get the type of the HTML tag that was used ot instantiate this
@@ -72,50 +85,8 @@ public:
    */
   NS_IMETHOD GetTagType(nsPluginTagType *aResult);
 
-  /**
-   * Get a ptr to the paired list of parameter names and values,
-   * returns the length of the array.
-   *
-   * Each name or value is a null-terminated string.
-   */
-  NS_IMETHOD GetParameters(uint16_t& aCount,
-                           const char*const*& aNames,
-                           const char*const*& aValues);
-
-  /**
-   * Get the value for the named parameter.  Returns null
-   * if the parameter was not set.
-   *
-   * @param aName   - name of the parameter
-   * @param aResult - parameter value
-   * @result        - NS_OK if this operation was successful
-   */
-  NS_IMETHOD GetParameter(const char* aName, const char* *aResult);
-
-  /**
-   * QueryInterface on nsIPluginInstancePeer to get this.
-   *
-   * (Corresponds to NPP_New's argc, argn, and argv arguments.)
-   * Get a ptr to the paired list of attribute names and values,
-   * returns the length of the array.
-   *
-   * Each name or value is a null-terminated string.
-   */
-  NS_IMETHOD GetAttributes(uint16_t& aCount,
-                           const char*const*& aNames,
-                           const char*const*& aValues);
-
-
-  /**
-   * Gets the value for the named attribute.
-   *
-   * @param aName   - the name of the attribute to find
-   * @param aResult - the resulting attribute
-   * @result - NS_OK if this operation was successful, NS_ERROR_FAILURE if
-   * this operation failed. result is set to NULL if the attribute is not found
-   * else to the found value.
-   */
-  NS_IMETHOD GetAttribute(const char* aName, const char* *aResult);
+  void GetParameters(nsTArray<mozilla::dom::MozPluginParameter>& parameters);
+  void GetAttributes(nsTArray<mozilla::dom::MozPluginParameter>& attributes);
 
   /**
    * Returns the DOM element corresponding to the tag which references
@@ -149,14 +120,27 @@ public:
   
   nsresult Init(nsIContent* aContent);
   
-  void* GetPluginPortFromWidget();
+  void* GetPluginPort();
   void ReleasePluginPort(void* pluginPort);
 
   nsEventStatus ProcessEvent(const mozilla::WidgetGUIEvent& anEvent);
+
+  static void GeneratePluginEvent(
+                const mozilla::WidgetCompositionEvent* aSrcCompositionEvent,
+                mozilla::WidgetCompositionEvent* aDistCompositionEvent);
+
+#if defined(XP_WIN)
+  void SetWidgetWindowAsParent(HWND aWindowToAdopt);
+  nsresult SetNetscapeWindowAsParent(HWND aWindowToAdopt);
+#endif
   
 #ifdef XP_MACOSX
   enum { ePluginPaintEnable, ePluginPaintDisable };
-  
+
+  void WindowFocusMayHaveChanged();
+
+  bool WindowIsActive();
+  void SendWindowFocusChanged(bool aIsActive);
   NPDrawingModel GetDrawingModel();
   bool IsRemoteDrawingCoreAnimation();
   nsresult ContentsScaleFactorChanged(double aContentsScaleFactor);
@@ -165,34 +149,21 @@ public:
   void AddToCARefreshTimer();
   void RemoveFromCARefreshTimer();
   // This calls into the plugin (NPP_SetWindow) and can run script.
-  void* FixUpPluginWindow(int32_t inPaintState);
+  void FixUpPluginWindow(int32_t inPaintState);
   void HidePluginWindow();
-  // Set a flag that (if true) indicates the plugin port info has changed and
-  // SetWindow() needs to be called.
-  void SetPluginPortChanged(bool aState) { mPluginPortChanged = aState; }
-  // Return a pointer to the internal nsPluginPort structure that's used to
-  // store a copy of plugin port info and to detect when it's been changed.
-  void* GetPluginPortCopy();
   // Set plugin port info in the plugin (in the 'window' member of the
-  // NPWindow structure passed to the plugin by SetWindow()) and set a
-  // flag (mPluginPortChanged) to indicate whether or not this info has
-  // changed, and SetWindow() needs to be called again.
-  void* SetPluginPortAndDetectChange();
-  // Flag when we've set up a Thebes (and CoreGraphics) context in
-  // nsObjectFrame::PaintPlugin().  We need to know this in
-  // FixUpPluginWindow() (i.e. we need to know when FixUpPluginWindow() has
-  // been called from nsObjectFrame::PaintPlugin() when we're using the
-  // CoreGraphics drawing model).
-  void BeginCGPaint();
-  void EndCGPaint();
+  // NPWindow structure passed to the plugin by SetWindow()).
+  void SetPluginPort();
 #else // XP_MACOSX
   void UpdateWindowPositionAndClipRect(bool aSetWindow);
   void UpdateWindowVisibility(bool aVisible);
-  void UpdateDocumentActiveState(bool aIsActive);
 #endif // XP_MACOSX
 
-  void SetFrame(nsObjectFrame *aFrame);
-  nsObjectFrame* GetFrame();
+  void ResolutionMayHaveChanged();
+  void UpdateDocumentActiveState(bool aIsActive);
+
+  void SetFrame(nsPluginFrame *aFrame);
+  nsPluginFrame* GetFrame();
 
   uint32_t GetLastEventloopNestingLevel() const {
     return mLastEventloopNestingLevel; 
@@ -257,6 +228,13 @@ public:
 
   // Returns the image container that has our currently displayed image.
   already_AddRefed<mozilla::layers::ImageContainer> GetImageContainer();
+  // Returns true if this is windowed plugin that can return static captures
+  // for scroll operations.
+  bool NeedsScrollImageLayer();
+  // Notification we receive from nsPluginFrame about scroll state.
+  bool UpdateScrollState(bool aIsScrolling);
+
+  void DidComposite();
 
   /**
    * Returns the bounds of the current async-rendered surface. This can only
@@ -269,9 +247,9 @@ public:
   // The eventual target of these operations is PluginInstanceParent,
   // but it takes several hops to get there.
   void SetBackgroundUnknown();
-  already_AddRefed<gfxContext> BeginUpdateBackground(const nsIntRect& aRect);
-  void EndUpdateBackground(gfxContext* aContext, const nsIntRect& aRect);
-  
+  already_AddRefed<DrawTarget> BeginUpdateBackground(const nsIntRect& aRect);
+  void EndUpdateBackground(const nsIntRect& aRect);
+
   bool UseAsyncRendering();
 
   already_AddRefed<nsIURI> GetBaseURI() const;
@@ -289,7 +267,18 @@ public:
   // Called from AndroidJNI when we removed the fullscreen view.
   static void ExitFullScreen(jobject view);
 #endif
-  
+
+  void NotifyHostAsyncInitFailed();
+  void NotifyHostCreateWidget();
+  void NotifyDestroyPending();
+
+  bool GetCompositionString(uint32_t aIndex, nsTArray<uint8_t>* aString,
+                            int32_t* aLength);
+  bool SetCandidateWindow(
+           const mozilla::widget::CandidateWindowPosition& aPosition);
+  bool RequestCommitOrCancel(bool aCommitted);
+
+  void GetCSSZoomFactor(float *result);
 private:
   virtual ~nsPluginInstanceOwner();
 
@@ -300,8 +289,7 @@ private:
     return NS_SUCCEEDED(mInstance->GetImageSize(&size)) &&
     size == nsIntSize(mPluginWindow->width, mPluginWindow->height);
   }
-  
-  void FixUpURLS(const nsString &name, nsAString &value);
+
 #ifdef MOZ_WIDGET_ANDROID
   mozilla::LayoutDeviceRect GetPluginRect();
   bool AddPluginView(const mozilla::LayoutDeviceRect& aRect = mozilla::LayoutDeviceRect(0, 0, 0, 0));
@@ -310,36 +298,44 @@ private:
   bool mFullScreen;
   void* mJavaView;
 #endif 
+
+#if defined(XP_WIN)
+  nsIWidget* GetContainingWidgetIfOffset();
+  already_AddRefed<mozilla::TextComposition> GetTextComposition();
+  void HandleNoConsumedCompositionMessage(
+    mozilla::WidgetCompositionEvent* aCompositionEvent,
+    const NPEvent* aPluginEvent);
+  bool mGotCompositionData;
+  bool mSentStartComposition;
+  bool mPluginDidNotHandleIMEComposition;
+#endif
  
   nsPluginNativeWindow       *mPluginWindow;
-  nsRefPtr<nsNPAPIPluginInstance> mInstance;
-  nsObjectFrame              *mObjectFrame;
-  nsIContent                 *mContent; // WEAK, content owns us
+  RefPtr<nsNPAPIPluginInstance> mInstance;
+  nsPluginFrame              *mPluginFrame;
+  nsWeakPtr                   mContent; // WEAK, content owns us
   nsCString                   mDocumentBase;
   bool                        mWidgetCreationComplete;
   nsCOMPtr<nsIWidget>         mWidget;
-  nsRefPtr<nsPluginHost>      mPluginHost;
+  RefPtr<nsPluginHost>      mPluginHost;
   
 #ifdef XP_MACOSX
-  NP_CGContext                              mCGPluginPortCopy;
-  int32_t                                   mInCGPaintLevel;
-  mozilla::RefPtr<MacIOSurface>             mIOSurface;
-  mozilla::RefPtr<nsCARenderer>             mCARenderer;
-  CGColorSpaceRef                           mColorProfile;
   static nsCOMPtr<nsITimer>                *sCATimer;
   static nsTArray<nsPluginInstanceOwner*>  *sCARefreshListeners;
   bool                                      mSentInitialTopLevelWindowEvent;
+  bool                                      mLastWindowIsActive;
+  bool                                      mLastContentFocused;
+  double                                    mLastScaleFactor;
+  // True if, the next time the window is activated, we should blur ourselves.
+  bool                                      mShouldBlurOnActivate;
 #endif
-
+  double                                    mLastCSSZoomFactor;
   // Initially, the event loop nesting level we were created on, it's updated
   // if we detect the appshell is on a lower level as long as we're not stopped.
   // We delay DoStopPlugin() until the appshell reaches this level or lower.
   uint32_t                    mLastEventloopNestingLevel;
   bool                        mContentFocused;
   bool                        mWidgetVisible;    // used on Mac to store our widget's visible state
-#ifdef XP_MACOSX
-  bool                        mPluginPortChanged;
-#endif
 #ifdef MOZ_X11
   // Used with windowless plugins only, initialized in CreateWidget().
   bool                        mFlash10Quirks;
@@ -347,11 +343,6 @@ private:
   bool                        mPluginWindowVisible;
   bool                        mPluginDocumentActiveState;
 
-  uint16_t          mNumCachedAttrs;
-  uint16_t          mNumCachedParams;
-  char              **mCachedAttrParamNames;
-  char              **mCachedAttrParamValues;
-  
 #ifdef XP_MACOSX
   NPEventModel mEventModel;
   // This is a hack! UseAsyncRendering() can incorrectly return false
@@ -362,17 +353,30 @@ private:
 #endif
   
   // pointer to wrapper for nsIDOMContextMenuListener
-  nsRefPtr<nsPluginDOMContextMenuListener> mCXMenuListener;
+  RefPtr<nsPluginDOMContextMenuListener> mCXMenuListener;
   
   nsresult DispatchKeyToPlugin(nsIDOMEvent* aKeyEvent);
   nsresult DispatchMouseToPlugin(nsIDOMEvent* aMouseEvent,
                                  bool aAllowPropagate = false);
   nsresult DispatchFocusToPlugin(nsIDOMEvent* aFocusEvent);
+  nsresult DispatchCompositionToPlugin(nsIDOMEvent* aEvent);
+
+#ifdef XP_WIN
+  void CallDefaultProc(const mozilla::WidgetGUIEvent* aEvent);
+#endif
+
+#ifdef XP_MACOSX
+  static NPBool ConvertPointPuppet(PuppetWidget *widget, nsPluginFrame* pluginFrame,
+                            double sourceX, double sourceY, NPCoordinateSpace sourceSpace,
+                            double *destX, double *destY, NPCoordinateSpace destSpace);
+  static NPBool ConvertPointNoPuppet(nsIWidget *widget, nsPluginFrame* pluginFrame,
+                            double sourceX, double sourceY, NPCoordinateSpace sourceSpace,
+                            double *destX, double *destY, NPCoordinateSpace destSpace);
+  void PerformDelayedBlurs();
+#endif    // XP_MACOSX
 
   int mLastMouseDownButtonType;
-  
-  nsresult EnsureCachedAttrParamArrays();
-  
+
 #ifdef MOZ_X11
   class Renderer
 #if defined(MOZ_WIDGET_QT)
@@ -389,7 +393,7 @@ private:
     {}
     virtual nsresult DrawWithXlib(cairo_surface_t* surface,
                                   nsIntPoint offset,
-                                  nsIntRect* clipRects, uint32_t numClipRects) MOZ_OVERRIDE;
+                                  nsIntRect* clipRects, uint32_t numClipRects) override;
   private:
     NPWindow* mWindow;
     nsPluginInstanceOwner* mInstanceOwner;
@@ -399,6 +403,9 @@ private:
 #endif
 
   bool mWaitingForPaint;
+#if defined(XP_WIN)
+  bool mScrollState;
+#endif
 };
 
 #endif // nsPluginInstanceOwner_h_

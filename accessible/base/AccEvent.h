@@ -75,7 +75,7 @@ public:
     eDoNotEmit
   };
 
-  // Initialize with an nsIAccessible
+  // Initialize with an accessible.
   AccEvent(uint32_t aEventType, Accessible* aAccessible,
            EIsFromUserInput aIsFromUserInput = eAutoDetect,
            EEventRule aEventRule = eRemoveDupes);
@@ -105,7 +105,8 @@ public:
     eTextSelChangeEvent,
     eSelectionChangeEvent,
     eTableChangeEvent,
-    eVirtualCursorChangeEvent
+    eVirtualCursorChangeEvent,
+    eObjectAttrChangedEvent
   };
 
   static const EventGroup kEventGroup = eGenericEvent;
@@ -126,7 +127,7 @@ protected:
   bool mIsFromUserInput;
   uint32_t mEventType;
   EEventRule mEventRule;
-  nsRefPtr<Accessible> mAccessible;
+  RefPtr<Accessible> mAccessible;
 
   friend class EventQueue;
   friend class AccReorderEvent;
@@ -153,7 +154,7 @@ public:
 
   // AccEvent
   static const EventGroup kEventGroup = eStateChangeEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccEvent::GetEventGroups() | (1U << eStateChangeEvent);
   }
@@ -182,7 +183,7 @@ public:
 
   // AccEvent
   static const EventGroup kEventGroup = eTextChangeEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccEvent::GetEventGroups() | (1U << eTextChangeEvent);
   }
@@ -193,6 +194,7 @@ public:
   bool IsTextInserted() const { return mIsInserted; }
   void GetModifiedText(nsAString& aModifiedText)
     { aModifiedText = mModifiedText; }
+  const nsString& ModifiedText() const { return mModifiedText; }
 
 private:
   int32_t mStart;
@@ -210,8 +212,7 @@ private:
 class AccMutationEvent: public AccEvent
 {
 public:
-  AccMutationEvent(uint32_t aEventType, Accessible* aTarget,
-                   nsINode* aTargetNode) :
+  AccMutationEvent(uint32_t aEventType, Accessible* aTarget) :
     AccEvent(aEventType, aTarget, eAutoDetect, eCoalesceMutationTextChange)
   {
     // Don't coalesce these since they are coalesced by reorder event. Coalesce
@@ -222,7 +223,7 @@ public:
 
   // Event
   static const EventGroup kEventGroup = eMutationEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccEvent::GetEventGroups() | (1U << eMutationEvent);
   }
@@ -231,10 +232,12 @@ public:
   bool IsShow() const { return mEventType == nsIAccessibleEvent::EVENT_SHOW; }
   bool IsHide() const { return mEventType == nsIAccessibleEvent::EVENT_HIDE; }
 
+  Accessible* Parent() const { return mParent; }
+
 protected:
   nsCOMPtr<nsINode> mNode;
-  nsRefPtr<Accessible> mParent;
-  nsRefPtr<AccTextChangeEvent> mTextChangeEvent;
+  RefPtr<Accessible> mParent;
+  RefPtr<AccTextChangeEvent> mTextChangeEvent;
 
   friend class EventQueue;
 };
@@ -246,11 +249,11 @@ protected:
 class AccHideEvent: public AccMutationEvent
 {
 public:
-  AccHideEvent(Accessible* aTarget, nsINode* aTargetNode);
+  explicit AccHideEvent(Accessible* aTarget, bool aNeedsShutdown = true);
 
   // Event
   static const EventGroup kEventGroup = eHideEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccMutationEvent::GetEventGroups() | (1U << eHideEvent);
   }
@@ -259,10 +262,12 @@ public:
   Accessible* TargetParent() const { return mParent; }
   Accessible* TargetNextSibling() const { return mNextSibling; }
   Accessible* TargetPrevSibling() const { return mPrevSibling; }
+  bool NeedsShutdown() const { return mNeedsShutdown; }
 
 protected:
-  nsRefPtr<Accessible> mNextSibling;
-  nsRefPtr<Accessible> mPrevSibling;
+  bool mNeedsShutdown;
+  RefPtr<Accessible> mNextSibling;
+  RefPtr<Accessible> mPrevSibling;
 
   friend class EventQueue;
 };
@@ -274,11 +279,11 @@ protected:
 class AccShowEvent: public AccMutationEvent
 {
 public:
-  AccShowEvent(Accessible* aTarget, nsINode* aTargetNode);
+  explicit AccShowEvent(Accessible* aTarget);
 
   // Event
   static const EventGroup kEventGroup = eShowEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccMutationEvent::GetEventGroups() | (1U << eShowEvent);
   }
@@ -291,14 +296,14 @@ public:
 class AccReorderEvent : public AccEvent
 {
 public:
-  AccReorderEvent(Accessible* aTarget) :
+  explicit AccReorderEvent(Accessible* aTarget) :
     AccEvent(::nsIAccessibleEvent::EVENT_REORDER, aTarget,
              eAutoDetect, eCoalesceReorder) { }
   virtual ~AccReorderEvent() { }
 
   // Event
   static const EventGroup kEventGroup = eReorderEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccEvent::GetEventGroups() | (1U << eReorderEvent);
   }
@@ -351,7 +356,7 @@ public:
 
   // AccEvent
   static const EventGroup kEventGroup = eCaretMoveEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccEvent::GetEventGroups() | (1U << eCaretMoveEvent);
   }
@@ -377,7 +382,7 @@ public:
 
   // AccEvent
   static const EventGroup kEventGroup = eTextSelChangeEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccEvent::GetEventGroups() | (1U << eTextSelChangeEvent);
   }
@@ -390,7 +395,7 @@ public:
   bool IsCaretMoveOnly() const;
 
 private:
-  nsRefPtr<dom::Selection> mSel;
+  RefPtr<dom::Selection> mSel;
   int32_t mReason;
 
   friend class EventQueue;
@@ -416,7 +421,7 @@ public:
 
   // AccEvent
   static const EventGroup kEventGroup = eSelectionChangeEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccEvent::GetEventGroups() | (1U << eSelectionChangeEvent);
   }
@@ -425,8 +430,8 @@ public:
   Accessible* Widget() const { return mWidget; }
 
 private:
-  nsRefPtr<Accessible> mWidget;
-  nsRefPtr<Accessible> mItem;
+  RefPtr<Accessible> mWidget;
+  RefPtr<Accessible> mItem;
   SelChangeType mSelChangeType;
   uint32_t mPreceedingCount;
   AccSelChangeEvent* mPackedEvent;
@@ -446,7 +451,7 @@ public:
 
   // AccEvent
   static const EventGroup kEventGroup = eTableChangeEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccEvent::GetEventGroups() | (1U << eTableChangeEvent);
   }
@@ -467,30 +472,57 @@ class AccVCChangeEvent : public AccEvent
 {
 public:
   AccVCChangeEvent(Accessible* aAccessible,
-                   nsIAccessible* aOldAccessible,
+                   Accessible* aOldAccessible,
                    int32_t aOldStart, int32_t aOldEnd,
-                   int16_t aReason);
+                   int16_t aReason,
+                   EIsFromUserInput aIsFromUserInput = eFromUserInput);
 
   virtual ~AccVCChangeEvent() { }
 
   // AccEvent
   static const EventGroup kEventGroup = eVirtualCursorChangeEvent;
-  virtual unsigned int GetEventGroups() const
+  virtual unsigned int GetEventGroups() const override
   {
     return AccEvent::GetEventGroups() | (1U << eVirtualCursorChangeEvent);
   }
 
   // AccTableChangeEvent
-  nsIAccessible* OldAccessible() const { return mOldAccessible; }
+  Accessible* OldAccessible() const { return mOldAccessible; }
   int32_t OldStartOffset() const { return mOldStart; }
   int32_t OldEndOffset() const { return mOldEnd; }
   int32_t Reason() const { return mReason; }
 
 private:
-  nsRefPtr<nsIAccessible> mOldAccessible;
+  RefPtr<Accessible> mOldAccessible;
   int32_t mOldStart;
   int32_t mOldEnd;
   int16_t mReason;
+};
+
+/**
+ * Accessible object attribute changed event.
+ */
+class AccObjectAttrChangedEvent: public AccEvent
+{
+public:
+  AccObjectAttrChangedEvent(Accessible* aAccessible, nsIAtom* aAttribute) :
+    AccEvent(::nsIAccessibleEvent::EVENT_OBJECT_ATTRIBUTE_CHANGED, aAccessible),
+    mAttribute(aAttribute) { }
+
+  // AccEvent
+  static const EventGroup kEventGroup = eObjectAttrChangedEvent;
+  virtual unsigned int GetEventGroups() const override
+  {
+    return AccEvent::GetEventGroups() | (1U << eObjectAttrChangedEvent);
+  }
+
+  // AccObjectAttrChangedEvent
+  nsIAtom* GetAttribute() const { return mAttribute; }
+
+private:
+  nsCOMPtr<nsIAtom> mAttribute;
+
+  virtual ~AccObjectAttrChangedEvent() { }
 };
 
 /**
@@ -499,7 +531,7 @@ private:
 class downcast_accEvent
 {
 public:
-  downcast_accEvent(AccEvent* e) : mRawPtr(e) { }
+  explicit downcast_accEvent(AccEvent* e) : mRawPtr(e) { }
 
   template<class Destination>
   operator Destination*() {

@@ -23,23 +23,23 @@ static const SEC_ASN1Template nsslowcert_SubjectPublicKeyInfoTemplate[] = {
         offsetof(NSSLOWCERTSubjectPublicKeyInfo,algorithm),
         SEC_ASN1_SUB(SECOID_AlgorithmIDTemplate) },
     { SEC_ASN1_BIT_STRING,
-          offsetof(NSSLOWCERTSubjectPublicKeyInfo,subjectPublicKey), },
-    { 0, }
+          offsetof(NSSLOWCERTSubjectPublicKeyInfo,subjectPublicKey) },
+    { 0 }
 };
 
 static const SEC_ASN1Template nsslowcert_RSAPublicKeyTemplate[] = {
     { SEC_ASN1_SEQUENCE, 0, NULL, sizeof(NSSLOWKEYPublicKey) },
-    { SEC_ASN1_INTEGER, offsetof(NSSLOWKEYPublicKey,u.rsa.modulus), },
-    { SEC_ASN1_INTEGER, offsetof(NSSLOWKEYPublicKey,u.rsa.publicExponent), },
-    { 0, }
+    { SEC_ASN1_INTEGER, offsetof(NSSLOWKEYPublicKey,u.rsa.modulus) },
+    { SEC_ASN1_INTEGER, offsetof(NSSLOWKEYPublicKey,u.rsa.publicExponent) },
+    { 0 }
 };
 static const SEC_ASN1Template nsslowcert_DSAPublicKeyTemplate[] = {
-    { SEC_ASN1_INTEGER, offsetof(NSSLOWKEYPublicKey,u.dsa.publicValue), },
-    { 0, }
+    { SEC_ASN1_INTEGER, offsetof(NSSLOWKEYPublicKey,u.dsa.publicValue) },
+    { 0 }
 };
 static const SEC_ASN1Template nsslowcert_DHPublicKeyTemplate[] = {
-    { SEC_ASN1_INTEGER, offsetof(NSSLOWKEYPublicKey,u.dh.publicValue), },
-    { 0, }
+    { SEC_ASN1_INTEGER, offsetof(NSSLOWKEYPublicKey,u.dh.publicValue) },
+    { 0 }
 };
 
 /*
@@ -447,7 +447,7 @@ nsslowcert_EmailName(SECItem *derDN, char *space, unsigned int len)
 
 	    name=nsslowcert_dataStart(ava, ava_length, &name_length, PR_FALSE, 
 					NULL);
-	    if (oid == NULL) { return NULL; }
+	    if (name == NULL) { return NULL; }
 	    ava_length -= (name-ava)+name_length;
 	    ava = name+name_length;
 

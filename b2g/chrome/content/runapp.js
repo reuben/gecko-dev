@@ -3,14 +3,19 @@
 // runapp.js:
 // Provide a --runapp APPNAME command-line option.
 
-let runAppObj;
+var runAppObj;
 window.addEventListener('load', function() {
-  if (!window.arguments) {
+  // Get the command line arguments that were passed to the b2g client
+  let args;
+  try {
+    let service = Cc["@mozilla.org/commandlinehandler/general-startup;1?type=b2gcmds"].getService(Ci.nsISupports);
+    args = service.wrappedJSObject.cmdLine;
+  } catch(e) {}
+
+  if (!args) {
     return;
   }
 
-  // Get the command line arguments that were passed to the b2g client
-  let args = window.arguments[0].QueryInterface(Ci.nsICommandLine);
   let appname;
 
   // - Check if the argument is present before doing any work.
@@ -52,7 +57,7 @@ AppRunner.prototype = {
     // get a ref to the app <iframe>
     frameLoader.QueryInterface(Ci.nsIFrameLoader);
     // Ignore notifications that aren't from a BrowserOrApp
-    if (!frameLoader.ownerIsBrowserOrAppFrame) {
+    if (!frameLoader.ownerIsMozBrowserOrAppFrame) {
       return;
     }
 

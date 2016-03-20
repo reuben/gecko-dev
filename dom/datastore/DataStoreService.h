@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,7 +15,7 @@
 
 class nsIPrincipal;
 class nsIUUIDGenerator;
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 namespace dom {
@@ -27,8 +27,8 @@ class Promise;
 class RetrieveRevisionsCounter;
 class RevisionAddedEnableStoreCallback;
 
-class DataStoreService MOZ_FINAL : public nsIDataStoreService
-                                 , public nsIObserver
+class DataStoreService final : public nsIDataStoreService
+                             , public nsIObserver
 {
   friend class ContentChild;
   friend class FirstRevisionIdCallback;
@@ -53,8 +53,11 @@ public:
   nsresult GenerateUUID(nsAString& aID);
 
   nsresult GetDataStoresFromIPC(const nsAString& aName,
+                                const nsAString& aOwner,
                                 nsIPrincipal* aPrincipal,
                                 nsTArray<DataStoreSetting>* aValue);
+
+  void HomeScreenPrefChanged();
 
 private:
   DataStoreService();
@@ -77,14 +80,14 @@ private:
   nsresult CreateFirstRevisionId(uint32_t aAppId, const nsAString& aName,
                                  const nsAString& aManifestURL);
 
-  void GetDataStoresCreate(nsPIDOMWindow* aWindow, Promise* aPromise,
+  void GetDataStoresCreate(nsPIDOMWindowInner* aWindow, Promise* aPromise,
                            const nsTArray<DataStoreInfo>& aStores);
 
-  void GetDataStoresResolve(nsPIDOMWindow* aWindow, Promise* aPromise,
+  void GetDataStoresResolve(nsPIDOMWindowInner* aWindow, Promise* aPromise,
                             const nsTArray<DataStoreInfo>& aStores);
 
-  nsresult GetDataStoreInfos(const nsAString& aName, uint32_t aAppId,
-                             nsIPrincipal* aPrincipal,
+  nsresult GetDataStoreInfos(const nsAString& aName, const nsAString& aOwner,
+                             uint32_t aAppId, nsIPrincipal* aPrincipal,
                              nsTArray<DataStoreInfo>& aStores);
 
   void DeleteDataStores(uint32_t aAppId);
@@ -95,6 +98,9 @@ private:
   already_AddRefed<RetrieveRevisionsCounter> GetCounter(uint32_t aId) const;
 
   void RemoveCounter(uint32_t aId);
+
+  void DeleteDataStoresIfNotAllowed(const nsAString& aManifestURL);
+  void AddDataStoresIfAllowed(const nsAString& aManifestURL);
 
   nsClassHashtable<nsStringHashKey, HashApp> mStores;
   nsClassHashtable<nsStringHashKey, HashApp> mAccessStores;

@@ -186,9 +186,8 @@ DOMRequestIpcHelper.prototype = {
 
     if (this._listeners) {
       Object.keys(this._listeners).forEach((aName) => {
-        this._listeners[aName] ? cpmm.removeWeakMessageListener(aName, this)
-                               : cpmm.removeMessageListener(aName, this);
-        delete this._listeners[aName];
+        this._listeners[aName].weakRef ? cpmm.removeWeakMessageListener(aName, this)
+                                       : cpmm.removeMessageListener(aName, this);
       });
     }
 
@@ -277,6 +276,11 @@ DOMRequestIpcHelper.prototype = {
   },
 
   createRequest: function() {
+    // If we don't have a valid window object, throw.
+    if (!this._window) {
+      Cu.reportError("DOMRequestHelper trying to create a DOMRequest without a valid window, failing.");
+      throw Cr.NS_ERROR_FAILURE;
+    }
     return Services.DOMRequest.createRequest(this._window);
   },
 
@@ -286,7 +290,23 @@ DOMRequestIpcHelper.prototype = {
    * reference to window owned by this DOMRequestIPCHelper.
    */
   createPromise: function(aPromiseInit) {
+    // If we don't have a valid window object, throw.
+    if (!this._window) {
+      Cu.reportError("DOMRequestHelper trying to create a Promise without a valid window, failing.");
+      throw Cr.NS_ERROR_FAILURE;
+    }
     return new this._window.Promise(aPromiseInit);
+  },
+
+  /**
+   * createPromiseWithId() creates a new Promise, accepting a callback
+   * which is immediately called with the generated resolverId.
+   */
+  createPromiseWithId: function(aCallback) {
+    return this.createPromise(function(aResolve, aReject) {
+      let resolverId = this.getPromiseResolverId({ resolve: aResolve, reject: aReject });
+      aCallback(resolverId);
+    }.bind(this));
   },
 
   forEachRequest: function(aCallback) {

@@ -32,12 +32,16 @@ nsGridLayout2::nsGridLayout2(nsIPresShell* aPresShell):nsStackLayout()
 {
 }
 
+nsGridLayout2::~nsGridLayout2()
+{
+}
+
 // static
 void
-nsGridLayout2::AddOffset(nsBoxLayoutState& aState, nsIFrame* aChild, nsSize& aSize)
+nsGridLayout2::AddOffset(nsIFrame* aChild, nsSize& aSize)
 {
   nsMargin offset;
-  GetOffset(aState, aChild, offset);
+  GetOffset(aChild, offset);
   aSize.width += offset.left;
   aSize.height += offset.top;
 }
@@ -57,9 +61,9 @@ nsGridLayout2::Layout(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState)
 }
 
 void
-nsGridLayout2::IntrinsicWidthsDirty(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState)
+nsGridLayout2::IntrinsicISizesDirty(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState)
 {
-  nsStackLayout::IntrinsicWidthsDirty(aBox, aBoxLayoutState);
+  nsStackLayout::IntrinsicISizesDirty(aBox, aBoxLayoutState);
   // XXXldb We really don't need to do all the work that NeedsRebuild
   // does; we just need to mark intrinsic widths dirty on the
   // (row/column)(s/-groups).
@@ -120,7 +124,7 @@ nsGridLayout2::GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aState)
     }
 
     AddMargin(aBox, total);
-    AddOffset(aState, aBox, total);
+    AddOffset(aBox, total);
     AddLargestSize(minSize, total);
   }
   
@@ -159,7 +163,7 @@ nsGridLayout2::GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aState)
     }
 
     AddMargin(aBox, total);
-    AddOffset(aState, aBox, total);
+    AddOffset(aBox, total);
     AddLargestSize(pref, total);
   }
 
@@ -200,7 +204,7 @@ nsGridLayout2::GetMaxSize(nsIFrame* aBox, nsBoxLayoutState& aState)
     }
 
     AddMargin(aBox, total);
-    AddOffset(aState, aBox, total);
+    AddOffset(aBox, total);
     AddSmallestSize(maxSize, total);
   }
 

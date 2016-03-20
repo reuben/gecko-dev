@@ -25,6 +25,8 @@
 
 Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/NetUtil.jsm");
+
 
 XPCOMUtils.defineLazyGetter(this, "URL", function() {
   return "http://localhost:" + httpserver.identity.primaryPort;
@@ -68,8 +70,8 @@ function safebrowsingUpdateHandler(metadata, response) {
 }
 
 function setupChannel(path, loadContext) {
-  var ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
-  var channel = ios.newChannel(URL + path, "", null);
+  var channel = NetUtil.newChannel({uri: URL + path, loadUsingSystemPrincipal: true});
+  channel.loadInfo.originAttributes = loadContext.originAttributes;
   channel.notificationCallbacks = loadContext;
   channel.QueryInterface(Ci.nsIHttpChannel);
   return channel;
@@ -102,8 +104,6 @@ add_test(function test_safebrowsing_update() {
   var streamUpdater = Cc["@mozilla.org/url-classifier/streamupdater;1"]
                      .getService(Ci.nsIUrlClassifierStreamUpdater);
 
-  streamUpdater.updateUrl = URL + safebrowsingUpdatePath;
-
   function onSuccess() {
     run_next_test();
   }
@@ -115,7 +115,7 @@ add_test(function test_safebrowsing_update() {
   }
 
   streamUpdater.downloadUpdates("test-phish-simple,test-malware-simple", "",
-    onSuccess, onUpdateError, onDownloadError);
+    URL + safebrowsingUpdatePath, onSuccess, onUpdateError, onDownloadError);
 });
 
 add_test(function test_non_safebrowsing_cookie() {
@@ -126,12 +126,12 @@ add_test(function test_non_safebrowsing_cookie() {
   function setNonSafeBrowsingCookie() {
     var channel = setupChannel(setCookiePath, loadContext);
     channel.setRequestHeader("set-cookie", cookieName, false);
-    channel.asyncOpen(new ChannelListener(checkNonSafeBrowsingCookie, null), null);
+    channel.asyncOpen2(new ChannelListener(checkNonSafeBrowsingCookie, null));
   }
 
   function checkNonSafeBrowsingCookie() {
     var channel = setupChannel(checkCookiePath, loadContext);
-    channel.asyncOpen(new ChannelListener(completeCheckNonSafeBrowsingCookie, null), null);
+    channel.asyncOpen2(new ChannelListener(completeCheckNonSafeBrowsingCookie, null));
   }
 
   function completeCheckNonSafeBrowsingCookie(request, data, context) {
@@ -154,12 +154,12 @@ add_test(function test_safebrowsing_cookie() {
   function setSafeBrowsingCookie() {
     var channel = setupChannel(setCookiePath, loadContext);
     channel.setRequestHeader("set-cookie", cookieName, false);
-    channel.asyncOpen(new ChannelListener(checkSafeBrowsingCookie, null), null);
+    channel.asyncOpen2(new ChannelListener(checkSafeBrowsingCookie, null));
   }
 
   function checkSafeBrowsingCookie() {
     var channel = setupChannel(checkCookiePath, loadContext);
-    channel.asyncOpen(new ChannelListener(completeCheckSafeBrowsingCookie, null), null);
+    channel.asyncOpen2(new ChannelListener(completeCheckSafeBrowsingCookie, null));
   }
 
   function completeCheckSafeBrowsingCookie(request, data, context) {

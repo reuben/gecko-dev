@@ -137,7 +137,7 @@ typedef struct {
 #define INIT_ATTS_SIZE 16
 #define INIT_ATTS_VERSION 0xFFFFFFFF
 /* BEGIN MOZILLA CHANGE (Avoid slop in poolGrow() allocations) */
-#define INIT_BLOCK_SIZE (1024 - (offsetof(BLOCK, s) / sizeof(XML_Char)))
+#define INIT_BLOCK_SIZE ((int)(1024 - (offsetof(BLOCK, s) / sizeof(XML_Char))))
 /* END MOZILLA CHANGE */
 #define INIT_BUFFER_SIZE 1024
 
@@ -390,8 +390,10 @@ setContext(XML_Parser parser, const XML_Char *context);
 static void FASTCALL normalizePublicId(XML_Char *s);
 
 static DTD * dtdCreate(const XML_Memory_Handling_Suite *ms);
+/* BEGIN MOZILLA CHANGE (unused API) */
 /* do not call if parentParser != NULL */
-static void dtdReset(DTD *p, const XML_Memory_Handling_Suite *ms);
+//static void dtdReset(DTD *p, const XML_Memory_Handling_Suite *ms);
+/* END MOZILLA CHANGE */
 static void
 dtdDestroy(DTD *p, XML_Bool isDocEntity, const XML_Memory_Handling_Suite *ms);
 static int
@@ -403,7 +405,9 @@ static NAMED *
 lookup(HASH_TABLE *table, KEY name, size_t createSize);
 static void FASTCALL
 hashTableInit(HASH_TABLE *, const XML_Memory_Handling_Suite *ms);
-static void FASTCALL hashTableClear(HASH_TABLE *);
+/* BEGIN MOZILLA CHANGE (unused API) */
+//static void FASTCALL hashTableClear(HASH_TABLE *);
+/* END MOZILLA CHANGE */
 static void FASTCALL hashTableDestroy(HASH_TABLE *);
 static void FASTCALL
 hashTableIterInit(HASH_TABLE_ITER *, const HASH_TABLE *);
@@ -878,6 +882,8 @@ parserInit(XML_Parser parser, const XML_Char *encodingName)
 #endif
 }
 
+/* BEGIN MOZILLA CHANGE (unused API) */
+#if 0
 /* moves list of bindings to freeBindingList */
 static void FASTCALL
 moveToFreeBindingList(XML_Parser parser, BINDING *bindings)
@@ -890,8 +896,6 @@ moveToFreeBindingList(XML_Parser parser, BINDING *bindings)
   }
 }
 
-/* BEGIN MOZILLA CHANGE (unused API) */
-#if 0
 XML_Bool XMLCALL
 XML_ParserReset(XML_Parser parser, const XML_Char *encodingName)
 {
@@ -1653,6 +1657,12 @@ XML_ParseBuffer(XML_Parser parser, int len, int isFinal)
 void * XMLCALL
 XML_GetBuffer(XML_Parser parser, int len)
 {
+/* BEGIN MOZILLA CHANGE (sanity check len) */
+  if (len < 0) {
+    errorCode = XML_ERROR_NO_MEMORY;
+    return NULL;
+  }
+/* END MOZILLA CHANGE */
   switch (ps_parsing) {
   case XML_SUSPENDED:
     errorCode = XML_ERROR_SUSPENDED;
@@ -1664,8 +1674,13 @@ XML_GetBuffer(XML_Parser parser, int len)
   }
 
   if (len > bufferLim - bufferEnd) {
-    /* FIXME avoid integer overflow */
     int neededSize = len + (int)(bufferEnd - bufferPtr);
+/* BEGIN MOZILLA CHANGE (sanity check neededSize) */
+    if (neededSize < 0) {
+      errorCode = XML_ERROR_NO_MEMORY;
+      return NULL;
+    }
+/* END MOZILLA CHANGE */
 #ifdef XML_CONTEXT_BYTES
     int keep = (int)(bufferPtr - buffer);
 
@@ -1694,7 +1709,15 @@ XML_GetBuffer(XML_Parser parser, int len)
         bufferSize = INIT_BUFFER_SIZE;
       do {
         bufferSize *= 2;
-      } while (bufferSize < neededSize);
+/* BEGIN MOZILLA CHANGE (prevent infinite loop on overflow) */
+      } while (bufferSize < neededSize && bufferSize > 0);
+/* END MOZILLA CHANGE */
+/* BEGIN MOZILLA CHANGE (sanity check bufferSize) */
+      if (bufferSize <= 0) {
+        errorCode = XML_ERROR_NO_MEMORY;
+        return NULL;
+      }
+/* END MOZILLA CHANGE */
       newBuf = (char *)MALLOC(bufferSize);
       if (newBuf == 0) {
         errorCode = XML_ERROR_NO_MEMORY;
@@ -2969,7 +2992,6 @@ storeAtts(XML_Parser parser, const ENCODING *enc,
         static const XML_Char xmlnsPrefix[] = {
           'x', 'm', 'l', 'n', 's', '\0'
         };
-        XML_Bool appendXMLNS = XML_TRUE;
 
         ((XML_Char *)s)[-1] = 0;  /* clear flag */
         if (!poolAppendString(&tempPool, xmlnsNamespace)
@@ -5697,6 +5719,8 @@ dtdCreate(const XML_Memory_Handling_Suite *ms)
   return p;
 }
 
+/* BEGIN MOZILLA CHANGE (unused API) */
+#if 0
 static void
 dtdReset(DTD *p, const XML_Memory_Handling_Suite *ms)
 {
@@ -5738,6 +5762,8 @@ dtdReset(DTD *p, const XML_Memory_Handling_Suite *ms)
   p->hasParamEntityRefs = XML_FALSE;
   p->standalone = XML_FALSE;
 }
+#endif
+/* END MOZILLA CHANGE */
 
 static void
 dtdDestroy(DTD *p, XML_Bool isDocEntity, const XML_Memory_Handling_Suite *ms)
@@ -6065,6 +6091,8 @@ lookup(HASH_TABLE *table, KEY name, size_t createSize)
   return table->v[i];
 }
 
+/* BEGIN MOZILLA CHANGE (unused API) */
+#if 0
 static void FASTCALL
 hashTableClear(HASH_TABLE *table)
 {
@@ -6075,6 +6103,8 @@ hashTableClear(HASH_TABLE *table)
   }
   table->used = 0;
 }
+#endif
+/* END MOZILLA CHANGE */
 
 static void FASTCALL
 hashTableDestroy(HASH_TABLE *table)

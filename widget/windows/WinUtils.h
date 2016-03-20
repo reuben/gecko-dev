@@ -11,9 +11,18 @@
 #include <shobjidl.h>
 #include <uxtheme.h>
 #include <dwmapi.h>
+
+// Undo the windows.h damage
+#undef GetMessage
+#undef CreateEvent
+#undef GetClassName
+#undef GetBinaryType
+#undef RemoveDirectory
+
 #include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsRegion.h"
+#include "nsRect.h"
 
 #include "nsIRunnable.h"
 #include "nsICryptoHash.h"
@@ -23,17 +32,62 @@
 #include "nsIDownloader.h"
 #include "nsIURI.h"
 #include "nsIWidget.h"
+#include "nsIThread.h"
 
 #include "mozilla/Attributes.h"
+#include "mozilla/EventForwards.h"
+#include "mozilla/UniquePtr.h"
+
+/**
+ * NS_INLINE_DECL_IUNKNOWN_REFCOUNTING should be used for defining and
+ * implementing AddRef() and Release() of IUnknown interface.
+ * This depends on xpcom/glue/nsISupportsImpl.h.
+ */
+
+#define NS_INLINE_DECL_IUNKNOWN_REFCOUNTING(_class)                           \
+public:                                                                       \
+  STDMETHODIMP_(ULONG) AddRef()                                               \
+  {                                                                           \
+    MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                                \
+    MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                      \
+    NS_ASSERT_OWNINGTHREAD(_class);                                           \
+    ++mRefCnt;                                                                \
+    NS_LOG_ADDREF(this, mRefCnt, #_class, sizeof(*this));                     \
+    return static_cast<ULONG>(mRefCnt.get());                                 \
+  }                                                                           \
+  STDMETHODIMP_(ULONG) Release()                                              \
+  {                                                                           \
+    MOZ_ASSERT(int32_t(mRefCnt) > 0,                                          \
+      "Release called on object that has already been released!");            \
+    NS_ASSERT_OWNINGTHREAD(_class);                                           \
+    --mRefCnt;                                                                \
+    NS_LOG_RELEASE(this, mRefCnt, #_class);                                   \
+    if (mRefCnt == 0) {                                                       \
+      NS_ASSERT_OWNINGTHREAD(_class);                                         \
+      mRefCnt = 1; /* stabilize */                                            \
+      delete this;                                                            \
+      return 0;                                                               \
+    }                                                                         \
+    return static_cast<ULONG>(mRefCnt.get());                                 \
+  }                                                                           \
+protected:                                                                    \
+  nsAutoRefCnt mRefCnt;                                                       \
+  NS_DECL_OWNINGTHREAD                                                        \
+public:
 
 class nsWindow;
 class nsWindowBase;
 struct KeyPair;
-struct nsIntRect;
-class nsIThread;
 
 namespace mozilla {
 namespace widget {
+
+// Windows message debugging data
+typedef struct {
+  const char * mStr;
+  UINT         mId;
+} EventMsgInfo;
+extern EventMsgInfo gAllEvents[];
 
 // More complete QS definitions for MsgWaitForMultipleObjects() and
 // GetQueueStatus() that include newer win8 specific defines.
@@ -60,23 +114,45 @@ namespace widget {
 #define LogException(e) mozilla::widget::WinUtils::Log("%s Exception:%s", __FUNCTION__, e->ToString()->Data())
 #define LogHRESULT(hr) mozilla::widget::WinUtils::Log("%s hr=%X", __FUNCTION__, hr)
 
-class myDownloadObserver MOZ_FINAL : public nsIDownloadObserver
+#ifdef MOZ_PLACES
+class myDownloadObserver final : public nsIDownloadObserver
 {
+  ~myDownloadObserver() {}
+
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOWNLOADOBSERVER
 };
+#endif
 
-class WinUtils {
+class WinUtils
+{
 public:
+  /**
+   * Get the system's default logical-to-physical DPI scaling factor,
+   * which is based on the primary display. Note however that unlike
+   * LogToPhysFactor(GetPrimaryMonitor()), this will not change during
+   * a session even if the displays are reconfigured. This scale factor
+   * is used by Windows theme metrics etc, which do not fully support
+   * dynamic resolution changes but are only updated on logout.
+   */
+  static double SystemScaleFactor();
+
+  static bool IsPerMonitorDPIAware();
   /**
    * Functions to convert between logical pixels as used by most Windows APIs
    * and physical (device) pixels.
    */
-  static double LogToPhysFactor();
-  static double PhysToLogFactor();
-  static int32_t LogToPhys(double aValue);
-  static double PhysToLog(int32_t aValue);
+  static double LogToPhysFactor(HMONITOR aMonitor);
+  static double LogToPhysFactor(HWND aWnd) {
+    return LogToPhysFactor(::MonitorFromWindow(aWnd, MONITOR_DEFAULTTOPRIMARY));
+  }
+  static double LogToPhysFactor(HDC aDC) {
+    return LogToPhysFactor(::WindowFromDC(aDC));
+  }
+  static int32_t LogToPhys(HMONITOR aMonitor, double aValue);
+  static HMONITOR GetPrimaryMonitor();
+  static HMONITOR MonitorFromRect(const gfx::Rect& rect);
 
   /**
    * Logging helpers that dump output to prlog module 'Widget', console, and
@@ -105,8 +181,9 @@ public:
    * not aware of (e.g., from a different thread).
    * Note that this method may cause sync dispatch of sent (as opposed to
    * posted) messages.
+   * @param aTimeoutMs Timeout for waiting in ms, defaults to INFINITE
    */
-  static void WaitForMessage();
+  static void WaitForMessage(DWORD aTimeoutMs = INFINITE);
 
   /**
    * Gets the value of a string-typed registry value.
@@ -250,7 +327,7 @@ public:
    */
   static uint16_t GetMouseInputSource();
 
-  static bool GetIsMouseFromTouch(uint32_t aEventType);
+  static bool GetIsMouseFromTouch(EventMessage aEventType);
 
   /**
    * SHCreateItemFromParsingName() calls native SHCreateItemFromParsingName()
@@ -295,6 +372,13 @@ public:
   static nsIntRect ToIntRect(const RECT& aRect);
 
   /**
+   * Helper used in invalidating flash plugin windows owned
+   * by low rights flash containers.
+   */
+  static void InvalidatePluginAsWorkaround(nsIWidget* aWidget,
+                                           const LayoutDeviceIntRect& aRect);
+
+  /**
    * Returns true if the context or IME state is enabled.  Otherwise, false.
    */
   static bool IsIMEEnabled(const InputContext& aInputContext);
@@ -307,7 +391,34 @@ public:
   static void SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray,
                                         uint32_t aModifiers);
 
-  // dwmapi.dll function typedefs and declarations
+  /**
+  * Does device have touch support
+  */
+  static uint32_t IsTouchDeviceSupportPresent();
+
+  /**
+  * The maximum number of simultaneous touch contacts supported by the device.
+  * In the case of devices with multiple digitizers (e.g. multiple touch screens),
+  * the value will be the maximum of the set of maximum supported contacts by
+  * each individual digitizer.
+  */
+  static uint32_t GetMaxTouchPoints();
+
+  /**
+   * Detect if path is within the Users folder and Users is actually a junction
+   * point to another folder.
+   * If this is detected it will change the path to the actual path.
+   *
+   * @param aPath path to be resolved.
+   * @return true if successful, including if nothing needs to be changed.
+   *         false if something failed or aPath does not exist, aPath will
+   *               remain unchanged.
+   */
+  static bool ResolveMovedUsersFolder(std::wstring& aPath);
+
+  /**
+  * dwmapi.dll function typedefs and declarations
+  */
   typedef HRESULT (WINAPI*DwmExtendFrameIntoClientAreaProc)(HWND hWnd, const MARGINS *pMarInset);
   typedef HRESULT (WINAPI*DwmIsCompositionEnabledProc)(BOOL *pfEnabled);
   typedef HRESULT (WINAPI*DwmSetIconicThumbnailProc)(HWND hWnd, HBITMAP hBitmap, DWORD dwSITFlags);
@@ -317,6 +428,7 @@ public:
   typedef HRESULT (WINAPI*DwmInvalidateIconicBitmapsProc)(HWND hWnd);
   typedef HRESULT (WINAPI*DwmDefWindowProcProc)(HWND hWnd, UINT msg, LPARAM lParam, WPARAM wParam, LRESULT *aRetValue);
   typedef HRESULT (WINAPI*DwmGetCompositionTimingInfoProc)(HWND hWnd, DWM_TIMING_INFO *info);
+  typedef HRESULT (WINAPI*DwmFlushProc)(void);
 
   static DwmExtendFrameIntoClientAreaProc dwmExtendFrameIntoClientAreaPtr;
   static DwmIsCompositionEnabledProc dwmIsCompositionEnabledPtr;
@@ -327,10 +439,23 @@ public:
   static DwmInvalidateIconicBitmapsProc dwmInvalidateIconicBitmapsPtr;
   static DwmDefWindowProcProc dwmDwmDefWindowProcPtr;
   static DwmGetCompositionTimingInfoProc dwmGetCompositionTimingInfoPtr;
+  static DwmFlushProc dwmFlushProcPtr;
 
   static void Initialize();
 
   static bool ShouldHideScrollbars();
+
+  /**
+   * This function normalizes the input path, converts short filenames to long
+   * filenames, and substitutes environment variables for system paths.
+   * The resulting output string length is guaranteed to be <= MAX_PATH.
+   */
+  static bool SanitizePath(const wchar_t* aInputPath, nsAString& aOutput);
+
+  /**
+   * Retrieve a semicolon-delimited list of DLL files derived from AppInit_DLLs
+   */
+  static bool GetAppInitDLLs(nsAString& aOutput);
 
 private:
   typedef HRESULT (WINAPI * SHCreateItemFromParsingNamePtr)(PCWSTR pszPath,
@@ -343,10 +468,13 @@ private:
                                                      HANDLE hToken,
                                                      PWSTR *ppszPath);
   static SHGetKnownFolderPathPtr sGetKnownFolderPath;
+
+  static void GetWhitelistedPaths(
+      nsTArray<mozilla::Pair<nsString,nsDependentString>>& aOutput);
 };
 
 #ifdef MOZ_PLACES
-class AsyncFaviconDataReady MOZ_FINAL : public nsIFaviconDataCallback
+class AsyncFaviconDataReady final : public nsIFaviconDataCallback
 {
 public:
   NS_DECL_ISUPPORTS
@@ -357,6 +485,8 @@ public:
                         const bool aURLShortcut);
   nsresult OnFaviconDataNotAvailable(void);
 private:
+  ~AsyncFaviconDataReady() {}
+
   nsCOMPtr<nsIURI> mNewURI;
   nsCOMPtr<nsIThread> mIOThread;
   const bool mURLShortcut;
@@ -375,16 +505,15 @@ public:
 
   // Warning: AsyncEncodeAndWriteIcon assumes ownership of the aData buffer passed in
   AsyncEncodeAndWriteIcon(const nsAString &aIconPath,
-                          uint8_t *aData, uint32_t aDataLen, uint32_t aStride,
-                          uint32_t aWidth, uint32_t aHeight,
+                          UniquePtr<uint8_t[]> aData,
+                          uint32_t aStride, uint32_t aWidth, uint32_t aHeight,
                           const bool aURLShortcut);
-  virtual ~AsyncEncodeAndWriteIcon();
 
 private:
+  virtual ~AsyncEncodeAndWriteIcon();
+
   nsAutoString mIconPath;
-  nsAutoArrayPtr<uint8_t> mBuffer;
-  HMODULE sDwmDLL;
-  uint32_t mBufferLength;
+  UniquePtr<uint8_t[]> mBuffer;
   uint32_t mStride;
   uint32_t mWidth;
   uint32_t mHeight;
@@ -398,9 +527,10 @@ public:
   NS_DECL_NSIRUNNABLE
 
   AsyncDeleteIconFromDisk(const nsAString &aIconPath);
-  virtual ~AsyncDeleteIconFromDisk();
 
 private:
+  virtual ~AsyncDeleteIconFromDisk();
+
   nsAutoString mIconPath;
 };
 
@@ -411,8 +541,10 @@ public:
   NS_DECL_NSIRUNNABLE
 
   AsyncDeleteAllFaviconsFromDisk(bool aIgnoreRecent = false);
-  virtual ~AsyncDeleteAllFaviconsFromDisk();
+
 private:
+  virtual ~AsyncDeleteAllFaviconsFromDisk();
+
   int32_t mIcoNoDeleteSeconds;
   bool mIgnoreRecent;
 };
@@ -443,8 +575,6 @@ public:
 
   static int32_t GetICOCacheSecondsTimeout();
 };
-
-
 
 } // namespace widget
 } // namespace mozilla

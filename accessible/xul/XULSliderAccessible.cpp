@@ -23,7 +23,7 @@ XULSliderAccessible::
   XULSliderAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   AccessibleWrap(aContent, aDoc)
 {
-  mStateFlags |= eHasNumericValue;
+  mStateFlags |= eHasNumericValue | eNoXBLKids;
 }
 
 // Accessible
@@ -57,8 +57,6 @@ XULSliderAccessible::NativelyUnavailable() const
                                nsGkAtoms::_true, eCaseMatters);
 }
 
-// nsIAccessible
-
 void
 XULSliderAccessible::Value(nsString& aValue)
 {
@@ -71,27 +69,25 @@ XULSliderAccessible::ActionCount()
   return 1;
 }
 
-NS_IMETHODIMP
-XULSliderAccessible::GetActionName(uint8_t aIndex, nsAString& aName)
+void
+XULSliderAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 {
   aName.Truncate();
-
-  NS_ENSURE_ARG(aIndex == 0);
-
-  aName.AssignLiteral("activate");
-  return NS_OK;
+  if (aIndex == 0)
+    aName.AssignLiteral("activate");
 }
 
-NS_IMETHODIMP
+bool
 XULSliderAccessible::DoAction(uint8_t aIndex)
 {
-  NS_ENSURE_ARG(aIndex == 0);
+  if (aIndex != 0)
+    return false;
 
   nsIContent* sliderElm = GetSliderElement();
   if (sliderElm)
     DoCommand(sliderElm);
 
-  return NS_OK;
+  return true;
 }
 
 double
@@ -129,13 +125,6 @@ XULSliderAccessible::SetCurValue(double aValue)
     return true;
 
   return SetSliderAttr(nsGkAtoms::curpos, aValue);
-}
-
-bool
-XULSliderAccessible::CanHaveAnonChildren()
-{
-  // Do not allow anonymous xul:slider be accessible.
-  return false;
 }
 
 // Utils

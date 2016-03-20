@@ -6,15 +6,17 @@
 "filename": "mozmake.exe"
 },
 {
-"size": 51,
-"digest": "c8e40edb314eeabfb92c77cf5ff9a7857033f15dd65a00349bcf9e3e5b75624afc71f733b2ff7e029c20a78313038409c2bd022bf7e5a7e0c487fc2c2d640986",
+"size": 78886322,
+"digest": "9c2c40637de27a0852aa1166f2a08159908b23f7a55855c933087c541461bbb2a1ec9e0522df0d2b9da2b2c343b673dbb5a2fa8d30216fe8acee1eb1383336ea",
 "algorithm": "sha512",
-"filename": "setup.sh"
+"filename": "rustc-beta-i686-pc-windows-msvc.tar.bz2",
+"unpack": true
 },
 {
-"size": 165226,
-"digest": "79280f7595bc9e1613e05f8b2f0db3798ac739b96191e0f133e8ccd8ad149fedc84a1046e59863574189db28363a01712ae7b368ad1714e30ff88e7ebd5dad23",
+"size": 167175,
+"digest": "0b71a936edf5bd70cf274aaa5d7abc8f77fe8e7b5593a208f805cc9436fac646b9c4f0b43c2b10de63ff3da671497d35536077ecbc72dba7f8159a38b580f831",
 "algorithm": "sha512",
-"filename": "sccache.tar.bz2"
+"filename": "sccache.tar.bz2",
+"unpack": true
 }
 ]

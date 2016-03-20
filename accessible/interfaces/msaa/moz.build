@@ -4,20 +4,32 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-LIBRARY_NAME = 'AccessibleMarshal'
+GeckoSharedLibrary('AccessibleMarshal', linkage=None)
 
-GENERATED_SOURCES += [
-    'dlldata.c',
-    'ISimpleDOMDocument_i.c',
-    'ISimpleDOMDocument_p.c',
-    'ISimpleDOMNode_i.c',
-    'ISimpleDOMNode_p.c',
-    'ISimpleDOMText_i.c',
-    'ISimpleDOMText_p.c',
+SOURCES += [
+    '!dlldata.c',
+    '!ISimpleDOMDocument_i.c',
+    '!ISimpleDOMDocument_p.c',
+    '!ISimpleDOMNode_i.c',
+    '!ISimpleDOMNode_p.c',
+    '!ISimpleDOMText_i.c',
+    '!ISimpleDOMText_p.c',
 ]
-
-FORCE_SHARED_LIB = True
 
 DEFINES['REGISTER_PROXY_DLL'] = True
 
 DEFFILE = SRCDIR + '/AccessibleMarshal.def'
+
+OS_LIBS += [
+    'kernel32',
+    'rpcrt4',
+    'oleaut32',
+]
+
+# The Windows MIDL code generator creates things like:
+#
+#   #endif !_MIDL_USE_GUIDDEF_
+#
+# which clang-cl complains about.  MSVC doesn't, so turn this warning off.
+if CONFIG['CLANG_CL']:
+    CFLAGS += ['-Wno-extra-tokens']

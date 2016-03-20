@@ -7,6 +7,7 @@ dictionary DeviceStorageEnumerationParameters {
   Date since;
 };
 
+[Pref="device.storage.enabled"]
 interface DeviceStorage : EventTarget {
   attribute EventHandler onchange;
 
@@ -82,6 +83,13 @@ interface DeviceStorage : EventTarget {
   // for storing new files.
   readonly attribute boolean default;
 
+  // Indicates if the storage area denoted by storageName is removable
+  readonly attribute boolean isRemovable;
+
+  // True if the storage area is close to being full
+  readonly attribute boolean lowDiskSpace;
+
   [NewObject]
-  Promise getRoot();
+  // XXXbz what type does this really return?
+  Promise<any> getRoot();
 };

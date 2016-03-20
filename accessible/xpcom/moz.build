@@ -4,15 +4,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-EXPORTS += [
-    'xpcAccessibleHyperText.h',
-    'xpcAccessibleSelectable.h',
-    'xpcAccessibleValue.h',
-]
-
 UNIFIED_SOURCES += [
     'nsAccessibleRelation.cpp',
+    'xpcAccessible.cpp',
+    'xpcAccessibleApplication.cpp',
+    'xpcAccessibleDocument.cpp',
+    'xpcAccessibleGeneric.cpp',
+    'xpcAccessibleHyperLink.cpp',
     'xpcAccessibleHyperText.cpp',
+    'xpcAccessibleImage.cpp',
     'xpcAccessibleSelectable.cpp',
     'xpcAccessibleTable.cpp',
     'xpcAccessibleTableCell.cpp',
@@ -20,8 +20,12 @@ UNIFIED_SOURCES += [
     'xpcAccessibleValue.cpp',
 ]
 
-GENERATED_SOURCES += [
-    'xpcAccEvents.cpp',
+SOURCES += [
+    '!xpcAccEvents.cpp',
+]
+
+EXPORTS += [
+    '!xpcAccEvents.h',
 ]
 
 LOCAL_INCLUDES += [
@@ -29,7 +33,7 @@ LOCAL_INCLUDES += [
     '/accessible/generic',
 ]
 
-if CONFIG['MOZ_ENABLE_GTK']:
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     LOCAL_INCLUDES += [
         '/accessible/atk',
     ]
@@ -46,4 +50,19 @@ else:
         '/accessible/other',
     ]
 
+GENERATED_FILES += [
+    'xpcAccEvents.cpp',
+    'xpcAccEvents.h',
+]
+
+xpc_acc_events_h = GENERATED_FILES['xpcAccEvents.h']
+xpc_acc_events_h.script = 'AccEventGen.py:gen_header_file'
+xpc_acc_events_h.inputs += ['AccEvents.conf']
+
+xpc_acc_events_cpp = GENERATED_FILES['xpcAccEvents.cpp']
+xpc_acc_events_cpp.script = 'AccEventGen.py:gen_cpp_file'
+xpc_acc_events_cpp.inputs += ['AccEvents.conf']
+
 FINAL_LIBRARY = 'xul'
+
+include('/ipc/chromium/chromium-config.mozbuild')

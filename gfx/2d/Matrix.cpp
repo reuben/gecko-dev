@@ -4,27 +4,86 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Matrix.h"
+#include "Quaternion.h"
 #include "Tools.h"
+#include <algorithm>
+#include <ostream>
 #include <math.h>
+#include <float.h>  // for FLT_EPSILON
 
 #include "mozilla/FloatingPoint.h" // for UnspecifiedNaN
 
+using namespace std;
+
+
 namespace mozilla {
 namespace gfx {
+
+/* Force small values to zero.  We do this to avoid having sin(360deg)
+ * evaluate to a tiny but nonzero value.
+ */
+double
+FlushToZero(double aVal)
+{
+  // XXX Is double precision really necessary here
+  if (-FLT_EPSILON < aVal && aVal < FLT_EPSILON) {
+    return 0.0f;
+  } else {
+    return aVal;
+  }
+}
+
+/* Computes tan(aTheta).  For values of aTheta such that tan(aTheta) is
+ * undefined or very large, SafeTangent returns a manageably large value
+ * of the correct sign.
+ */
+double
+SafeTangent(double aTheta)
+{
+  // XXX Is double precision really necessary here
+  const double kEpsilon = 0.0001;
+
+  /* tan(theta) = sin(theta)/cos(theta); problems arise when
+   * cos(theta) is too close to zero.  Limit cos(theta) to the
+   * range [-1, -epsilon] U [epsilon, 1].
+   */
+
+  double sinTheta = sin(aTheta);
+  double cosTheta = cos(aTheta);
+
+  if (cosTheta >= 0 && cosTheta < kEpsilon) {
+    cosTheta = kEpsilon;
+  } else if (cosTheta < 0 && cosTheta >= -kEpsilon) {
+    cosTheta = -kEpsilon;
+  }
+  return FlushToZero(sinTheta / cosTheta);
+}
+
+std::ostream&
+operator<<(std::ostream& aStream, const Matrix& aMatrix)
+{
+  return aStream << "[ " << aMatrix._11
+                 << " "  << aMatrix._12
+                 << "; " << aMatrix._21
+                 << " "  << aMatrix._22
+                 << "; " << aMatrix._31
+                 << " "  << aMatrix._32
+                 << "; ]";
+}
 
 Matrix
 Matrix::Rotation(Float aAngle)
 {
   Matrix newMatrix;
 
-  Float s = sin(aAngle);
-  Float c = cos(aAngle);
+  Float s = sinf(aAngle);
+  Float c = cosf(aAngle);
 
   newMatrix._11 = c;
   newMatrix._12 = s;
   newMatrix._21 = -s;
   newMatrix._22 = c;
-  
+
   return newMatrix;
 }
 
@@ -59,7 +118,7 @@ Matrix::TransformBounds(const Rect &aRect) const
   return Rect(min_x, min_y, max_x - min_x, max_y - min_y);
 }
 
-void
+Matrix&
 Matrix::NudgeToIntegers()
 {
   NudgeToInteger(&_11);
@@ -68,109 +127,8 @@ Matrix::NudgeToIntegers()
   NudgeToInteger(&_22);
   NudgeToInteger(&_31);
   NudgeToInteger(&_32);
+  return *this;
 }
 
-Rect
-Matrix4x4::TransformBounds(const Rect& aRect) const
-{
-  Point quad[4];
-  Float min_x, max_x;
-  Float min_y, max_y;
-
-  quad[0] = *this * aRect.TopLeft();
-  quad[1] = *this * aRect.TopRight();
-  quad[2] = *this * aRect.BottomLeft();
-  quad[3] = *this * aRect.BottomRight();
-
-  min_x = max_x = quad[0].x;
-  min_y = max_y = quad[0].y;
-
-  for (int i = 1; i < 4; i++) {
-    if (quad[i].x < min_x) {
-      min_x = quad[i].x;
-    }
-    if (quad[i].x > max_x) {
-      max_x = quad[i].x;
-    }
-
-    if (quad[i].y < min_y) {
-      min_y = quad[i].y;
-    }
-    if (quad[i].y > max_y) {
-      max_y = quad[i].y;
-    }
-  }
-
-  return Rect(min_x, min_y, max_x - min_x, max_y - min_y);
-}
-
-bool
-Matrix4x4::Invert()
-{
-  Float det = Determinant();
-  if (!det) {
-    return false;
-  }
-
-  Matrix4x4 result;
-  result._11 = _23 * _34 * _42 - _24 * _33 * _42 + _24 * _32 * _43 - _22 * _34 * _43 - _23 * _32 * _44 + _22 * _33 * _44;
-  result._12 = _14 * _33 * _42 - _13 * _34 * _42 - _14 * _32 * _43 + _12 * _34 * _43 + _13 * _32 * _44 - _12 * _33 * _44;
-  result._13 = _13 * _24 * _42 - _14 * _23 * _42 + _14 * _22 * _43 - _12 * _24 * _43 - _13 * _22 * _44 + _12 * _23 * _44;
-  result._14 = _14 * _23 * _32 - _13 * _24 * _32 - _14 * _22 * _33 + _12 * _24 * _33 + _13 * _22 * _34 - _12 * _23 * _34;
-  result._21 = _24 * _33 * _41 - _23 * _34 * _41 - _24 * _31 * _43 + _21 * _34 * _43 + _23 * _31 * _44 - _21 * _33 * _44;
-  result._22 = _13 * _34 * _41 - _14 * _33 * _41 + _14 * _31 * _43 - _11 * _34 * _43 - _13 * _31 * _44 + _11 * _33 * _44;
-  result._23 = _14 * _23 * _41 - _13 * _24 * _41 - _14 * _21 * _43 + _11 * _24 * _43 + _13 * _21 * _44 - _11 * _23 * _44;
-  result._24 = _13 * _24 * _31 - _14 * _23 * _31 + _14 * _21 * _33 - _11 * _24 * _33 - _13 * _21 * _34 + _11 * _23 * _34;
-  result._31 = _22 * _34 * _41 - _24 * _32 * _41 + _24 * _31 * _42 - _21 * _34 * _42 - _22 * _31 * _44 + _21 * _32 * _44;
-  result._32 = _14 * _32 * _41 - _12 * _34 * _41 - _14 * _31 * _42 + _11 * _34 * _42 + _12 * _31 * _44 - _11 * _32 * _44;
-  result._33 = _12 * _24 * _41 - _14 * _22 * _41 + _14 * _21 * _42 - _11 * _24 * _42 - _12 * _21 * _44 + _11 * _22 * _44;
-  result._34 = _14 * _22 * _31 - _12 * _24 * _31 - _14 * _21 * _32 + _11 * _24 * _32 + _12 * _21 * _34 - _11 * _22 * _34;
-  result._41 = _23 * _32 * _41 - _22 * _33 * _41 - _23 * _31 * _42 + _21 * _33 * _42 + _22 * _31 * _43 - _21 * _32 * _43;
-  result._42 = _12 * _33 * _41 - _13 * _32 * _41 + _13 * _31 * _42 - _11 * _33 * _42 - _12 * _31 * _43 + _11 * _32 * _43;
-  result._43 = _13 * _22 * _41 - _12 * _23 * _41 - _13 * _21 * _42 + _11 * _23 * _42 + _12 * _21 * _43 - _11 * _22 * _43;
-  result._44 = _12 * _23 * _31 - _13 * _22 * _31 + _13 * _21 * _32 - _11 * _23 * _32 - _12 * _21 * _33 + _11 * _22 * _33;
-
-  result._11 /= det;
-  result._12 /= det;
-  result._13 /= det;
-  result._14 /= det;
-  result._21 /= det;
-  result._22 /= det;
-  result._23 /= det;
-  result._24 /= det;
-  result._31 /= det;
-  result._32 /= det;
-  result._33 /= det;
-  result._34 /= det;
-  result._41 /= det;
-  result._42 /= det;
-  result._43 /= det;
-  result._44 /= det;
-  *this = result;
-
-  return true;
-}
-
-void
-Matrix4x4::SetNAN()
-{
-  _11 = UnspecifiedNaN<Float>();
-  _21 = UnspecifiedNaN<Float>();
-  _31 = UnspecifiedNaN<Float>();
-  _41 = UnspecifiedNaN<Float>();
-  _12 = UnspecifiedNaN<Float>();
-  _22 = UnspecifiedNaN<Float>();
-  _32 = UnspecifiedNaN<Float>();
-  _42 = UnspecifiedNaN<Float>();
-  _13 = UnspecifiedNaN<Float>();
-  _23 = UnspecifiedNaN<Float>();
-  _33 = UnspecifiedNaN<Float>();
-  _43 = UnspecifiedNaN<Float>();
-  _14 = UnspecifiedNaN<Float>();
-  _24 = UnspecifiedNaN<Float>();
-  _34 = UnspecifiedNaN<Float>();
-  _44 = UnspecifiedNaN<Float>();
-}
-
-}
-}
+} // namespace gfx
+} // namespace mozilla

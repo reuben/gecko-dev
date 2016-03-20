@@ -30,6 +30,7 @@ CUSTOM_NSIS_PLUGINS = \
 	CityHash.dll \
 	InetBgDL.dll \
 	InvokeShellVerb.dll \
+	liteFirewallW.dll \
 	ServicesHelper.dll \
 	ShellLink.dll \
 	UAC.dll \
@@ -96,13 +97,4 @@ maintenanceservice_installer::
 	cd $(CONFIG_DIR) && $(MAKENSISU) maintenanceservice_installer.nsi
 	$(NSINSTALL) -D $(DIST)/bin/
 	cp $(CONFIG_DIR)/maintenanceservice_installer.exe $(DIST)/bin
-endif
-
-ifdef MOZ_WEBAPP_RUNTIME
-webapp_uninstaller::
-	$(INSTALL) $(addprefix $(MOZILLA_DIR)/toolkit/mozapps/installer/windows/nsis/,$(TOOLKIT_NSIS_FILES)) $(CONFIG_DIR)
-	$(INSTALL) $(addprefix $(MOZILLA_DIR)/other-licenses/nsis/Plugins/,$(CUSTOM_NSIS_PLUGINS)) $(CONFIG_DIR)
-	cd $(CONFIG_DIR) && $(MAKENSISU) webapp-uninstaller.nsi
-	$(NSINSTALL) -D $(DIST)/bin
-	cp $(CONFIG_DIR)/webapp-uninstaller.exe $(DIST)/bin
 endif

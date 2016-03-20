@@ -60,8 +60,10 @@ if CONFIG['A11Y_LOG']:
 LOCAL_INCLUDES += [
     '/accessible/generic',
     '/accessible/html',
+    '/accessible/ipc',
     '/accessible/xpcom',
     '/accessible/xul',
+    '/dom/base',
     '/dom/xbl',
     '/ipc/chromium/src',
     '/layout/generic',
@@ -71,10 +73,11 @@ LOCAL_INCLUDES += [
     '/layout/xul/tree/',
 ]
 
-if CONFIG['MOZ_ENABLE_GTK']:
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     LOCAL_INCLUDES += [
         '/accessible/atk',
     ]
+    CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     LOCAL_INCLUDES += [
         '/accessible/windows/ia2',
@@ -90,3 +93,5 @@ else:
     ]
 
 FINAL_LIBRARY = 'xul'
+
+include('/ipc/chromium/chromium-config.mozbuild')

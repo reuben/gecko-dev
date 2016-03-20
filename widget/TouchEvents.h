@@ -31,30 +31,31 @@ namespace mozilla {
 class WidgetGestureNotifyEvent : public WidgetGUIEvent
 {
 public:
-  virtual WidgetGestureNotifyEvent* AsGestureNotifyEvent() MOZ_OVERRIDE
+  virtual WidgetGestureNotifyEvent* AsGestureNotifyEvent() override
   {
     return this;
   }
 
-  WidgetGestureNotifyEvent(bool aIsTrusted, uint32_t aMessage,
-                           nsIWidget *aWidget) :
-    WidgetGUIEvent(aIsTrusted, aMessage, aWidget, NS_GESTURENOTIFY_EVENT),
-    panDirection(ePanNone), displayPanFeedback(false)
+  WidgetGestureNotifyEvent(bool aIsTrusted, EventMessage aMessage,
+                           nsIWidget *aWidget)
+    : WidgetGUIEvent(aIsTrusted, aMessage, aWidget, eGestureNotifyEventClass)
+    , panDirection(ePanNone)
+    , displayPanFeedback(false)
   {
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
     // XXX Looks like this event is handled only in PostHandleEvent() of
     //     EventStateManager.  Therefore, it might be possible to handle this
     //     in PreHandleEvent() and not to dispatch as a DOM event into the DOM
     //     tree like ContentQueryEvent.  Then, this event doesn't need to
     //     support Duplicate().
-    MOZ_ASSERT(eventStructType == NS_GESTURENOTIFY_EVENT,
+    MOZ_ASSERT(mClass == eGestureNotifyEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
     WidgetGestureNotifyEvent* result =
-      new WidgetGestureNotifyEvent(false, message, nullptr);
+      new WidgetGestureNotifyEvent(false, mMessage, nullptr);
     result->AssignGestureNotifyEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -82,21 +83,21 @@ public:
 };
 
 /******************************************************************************
- * mozilla::WidgetTouchEvent
+ * mozilla::WidgetSimpleGestureEvent
  ******************************************************************************/
 
 class WidgetSimpleGestureEvent : public WidgetMouseEventBase
 {
 public:
-  virtual WidgetSimpleGestureEvent* AsSimpleGestureEvent() MOZ_OVERRIDE
+  virtual WidgetSimpleGestureEvent* AsSimpleGestureEvent() override
   {
     return this;
   }
 
-  WidgetSimpleGestureEvent(bool aIsTrusted, uint32_t aMessage,
+  WidgetSimpleGestureEvent(bool aIsTrusted, EventMessage aMessage,
                            nsIWidget* aWidget)
     : WidgetMouseEventBase(aIsTrusted, aMessage, aWidget,
-                           NS_SIMPLE_GESTURE_EVENT)
+                           eSimpleGestureEventClass)
     , allowedDirections(0)
     , direction(0)
     , delta(0.0)
@@ -105,8 +106,8 @@ public:
   }
 
   WidgetSimpleGestureEvent(const WidgetSimpleGestureEvent& aOther)
-    : WidgetMouseEventBase(aOther.mFlags.mIsTrusted, aOther.message,
-                           aOther.widget, NS_SIMPLE_GESTURE_EVENT)
+    : WidgetMouseEventBase(aOther.mFlags.mIsTrusted, aOther.mMessage,
+                           aOther.widget, eSimpleGestureEventClass)
     , allowedDirections(aOther.allowedDirections)
     , direction(aOther.direction)
     , delta(aOther.delta)
@@ -114,13 +115,13 @@ public:
   {
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_SIMPLE_GESTURE_EVENT,
+    MOZ_ASSERT(mClass == eSimpleGestureEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
     WidgetSimpleGestureEvent* result =
-      new WidgetSimpleGestureEvent(false, message, nullptr);
+      new WidgetSimpleGestureEvent(false, mMessage, nullptr);
     result->AssignSimpleGestureEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -155,29 +156,34 @@ public:
 class WidgetTouchEvent : public WidgetInputEvent
 {
 public:
-  virtual WidgetTouchEvent* AsTouchEvent() MOZ_OVERRIDE { return this; }
+  typedef nsTArray<RefPtr<mozilla::dom::Touch>> TouchArray;
+  typedef AutoTArray<RefPtr<mozilla::dom::Touch>, 10> AutoTouchArray;
+
+  virtual WidgetTouchEvent* AsTouchEvent() override { return this; }
 
   WidgetTouchEvent()
   {
+    MOZ_COUNT_CTOR(WidgetTouchEvent);
   }
 
-  WidgetTouchEvent(const WidgetTouchEvent& aOther) :
-    WidgetInputEvent(aOther.mFlags.mIsTrusted, aOther.message, aOther.widget,
-                     NS_TOUCH_EVENT)
+  WidgetTouchEvent(const WidgetTouchEvent& aOther)
+    : WidgetInputEvent(aOther.mFlags.mIsTrusted, aOther.mMessage, aOther.widget,
+                       eTouchEventClass)
   {
+    MOZ_COUNT_CTOR(WidgetTouchEvent);
     modifiers = aOther.modifiers;
     time = aOther.time;
     timeStamp = aOther.timeStamp;
     touches.AppendElements(aOther.touches);
-    mFlags.mCancelable = message != NS_TOUCH_CANCEL;
-    MOZ_COUNT_CTOR(WidgetTouchEvent);
+    mFlags.mCancelable = mMessage != eTouchCancel;
+    mFlags.mHandledByAPZ = aOther.mFlags.mHandledByAPZ;
   }
 
-  WidgetTouchEvent(bool aIsTrusted, uint32_t aMessage, nsIWidget* aWidget) :
-    WidgetInputEvent(aIsTrusted, aMessage, aWidget, NS_TOUCH_EVENT)
+  WidgetTouchEvent(bool aIsTrusted, EventMessage aMessage, nsIWidget* aWidget)
+    : WidgetInputEvent(aIsTrusted, aMessage, aWidget, eTouchEventClass)
   {
     MOZ_COUNT_CTOR(WidgetTouchEvent);
-    mFlags.mCancelable = message != NS_TOUCH_CANCEL;
+    mFlags.mCancelable = mMessage != eTouchCancel;
   }
 
   virtual ~WidgetTouchEvent()
@@ -185,18 +191,18 @@ public:
     MOZ_COUNT_DTOR(WidgetTouchEvent);
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_TOUCH_EVENT,
+    MOZ_ASSERT(mClass == eTouchEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
-    WidgetTouchEvent* result = new WidgetTouchEvent(false, message, nullptr);
+    WidgetTouchEvent* result = new WidgetTouchEvent(false, mMessage, nullptr);
     result->AssignTouchEventData(*this, true);
     result->mFlags = mFlags;
     return result;
   }
 
-  nsTArray<nsRefPtr<mozilla::dom::Touch>> touches;
+  TouchArray touches;
 
   void AssignTouchEventData(const WidgetTouchEvent& aEvent, bool aCopyTargets)
   {

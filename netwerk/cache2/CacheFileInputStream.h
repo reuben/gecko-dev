@@ -11,7 +11,6 @@
 #include "nsAutoPtr.h"
 #include "CacheFileChunk.h"
 
-
 namespace mozilla {
 namespace net {
 
@@ -27,13 +26,13 @@ class CacheFileInputStream : public nsIAsyncInputStream
   NS_DECL_NSISEEKABLESTREAM
 
 public:
-  CacheFileInputStream(CacheFile *aFile);
+  explicit CacheFileInputStream(CacheFile *aFile, nsISupports *aEntry);
 
-  NS_IMETHOD OnChunkRead(nsresult aResult, CacheFileChunk *aChunk);
-  NS_IMETHOD OnChunkWritten(nsresult aResult, CacheFileChunk *aChunk);
+  NS_IMETHOD OnChunkRead(nsresult aResult, CacheFileChunk *aChunk) override;
+  NS_IMETHOD OnChunkWritten(nsresult aResult, CacheFileChunk *aChunk) override;
   NS_IMETHOD OnChunkAvailable(nsresult aResult, uint32_t aChunkIdx,
-                              CacheFileChunk *aChunk);
-  NS_IMETHOD OnChunkUpdated(CacheFileChunk *aChunk);
+                              CacheFileChunk *aChunk) override;
+  NS_IMETHOD OnChunkUpdated(CacheFileChunk *aChunk) override;
 
   // Memory reporting
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
@@ -46,26 +45,30 @@ private:
   nsresult CloseWithStatusLocked(nsresult aStatus);
   void ReleaseChunk();
   void EnsureCorrectChunk(bool aReleaseOnly);
+
+  // CanRead returns negative value when output stream truncates the data before
+  // the input stream's mPos.
   void CanRead(int64_t *aCanRead, const char **aBuf);
   void NotifyListener();
   void MaybeNotifyListener();
 
-  nsRefPtr<CacheFile>      mFile;
-  nsRefPtr<CacheFileChunk> mChunk;
+  RefPtr<CacheFile>        mFile;
+  RefPtr<CacheFileChunk> mChunk;
   int64_t                  mPos;
   bool                     mClosed;
   nsresult                 mStatus;
   bool                     mWaitingForUpdate;
   int64_t                  mListeningForChunk;
-  bool                     mInReadSegments;
 
   nsCOMPtr<nsIInputStreamCallback> mCallback;
   uint32_t                         mCallbackFlags;
   nsCOMPtr<nsIEventTarget>         mCallbackTarget;
+  // Held purely for referencing purposes
+  RefPtr<nsISupports>              mCacheEntryHandle;
 };
 
 
-} // net
-} // mozilla
+} // namespace net
+} // namespace mozilla
 
 #endif

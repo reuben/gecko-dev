@@ -8,15 +8,15 @@ Cu.import("resource://services-sync/engines/bookmarks.js");
 Cu.import("resource://services-sync/util.js");
 Cu.import("resource://services-sync/service.js");
 Cu.import("resource://gre/modules/PlacesUtils.jsm");
-Cu.import("resource://testing-common/services-common/utils.js");
+Cu.import("resource://testing-common/services/common/utils.js");
 
 const DESCRIPTION_ANNO = "bookmarkProperties/description";
 
-let engine = Service.engineManager.get("bookmarks");
-let store = engine._store;
+var engine = Service.engineManager.get("bookmarks");
+var store = engine._store;
 
 // Record borrowed from Bug 631361.
-let record631361 = {
+var record631361 = {
   id: "M5bwUKK8hPyF",
   index: 150,
   modified: 1296768176.49,

@@ -19,27 +19,24 @@
 #include "nsWeakReference.h"
 
 // Interfaces
-#include "nsIDOMWindow.h"
 #include "nsIObserver.h"
 
 // Classes
 class nsPagePrintTimer;
 class nsIDocShell;
-class nsDeviceContext;
 class nsIDocument;
 class nsIDocumentViewerPrint;
 class nsPrintObject;
 class nsIDocShell;
 class nsIPageSequenceFrame;
-class nsIWeakReference;
 
 //------------------------------------------------------------------------
 // nsPrintEngine Class
 //
 //------------------------------------------------------------------------
-class nsPrintEngine MOZ_FINAL : public nsIObserver,
-                                public nsIWebProgressListener,
-                                public nsSupportsWeakReference
+class nsPrintEngine final : public nsIObserver,
+                            public nsIWebProgressListener,
+                            public nsSupportsWeakReference
 {
 public:
   // nsISupports interface...
@@ -54,7 +51,7 @@ public:
   NS_IMETHOD Print(nsIPrintSettings*       aPrintSettings,
                    nsIWebProgressListener* aWebProgressListener);
   NS_IMETHOD PrintPreview(nsIPrintSettings* aPrintSettings,
-                          nsIDOMWindow *aChildDOMWin,
+                          mozIDOMWindowProxy* aChildDOMWin,
                           nsIWebProgressListener* aWebProgressListener);
   NS_IMETHOD GetIsFramesetDocument(bool *aIsFramesetDocument);
   NS_IMETHOD GetIsIFrameSelected(bool *aIsIFrameSelected);
@@ -137,25 +134,26 @@ public:
   nsresult CheckForPrinters(nsIPrintSettings* aPrintSettings);
   void CleanupDocTitleArray(char16_t**& aArray, int32_t& aCount);
 
-  bool IsThereARangeSelection(nsIDOMWindow * aDOMWin);
+  bool IsThereARangeSelection(nsPIDOMWindowOuter* aDOMWin);
 
+  void FirePrintingErrorEvent(nsresult aPrintError);
   //---------------------------------------------------------------------
 
 
   // Timer Methods
   nsresult StartPagePrintTimer(nsPrintObject* aPO);
 
-  bool IsWindowsInOurSubTree(nsPIDOMWindow * aDOMWindow);
+  bool IsWindowsInOurSubTree(nsPIDOMWindowOuter* aDOMWindow);
   static bool IsParentAFrameSet(nsIDocShell * aParent);
   bool IsThereAnIFrameSelected(nsIDocShell* aDocShell,
-                                 nsIDOMWindow* aDOMWin,
-                                 bool& aIsParentFrameSet);
+                               nsPIDOMWindowOuter* aDOMWin,
+                               bool& aIsParentFrameSet);
 
   static nsPrintObject* FindPrintObjectByDOMWin(nsPrintObject* aParentObject,
-                                                nsIDOMWindow* aDOMWin);
+                                                nsPIDOMWindowOuter* aDOMWin);
 
   // get the currently infocus frame for the document viewer
-  already_AddRefed<nsIDOMWindow> FindFocusedDOMWindow();
+  already_AddRefed<nsPIDOMWindowOuter> FindFocusedDOMWindow();
 
   //---------------------------------------------------------------------
   // Static Methods
@@ -167,8 +165,6 @@ public:
                              nsAString&       aTitle,
                              nsAString&       aURLStr,
                              eDocTitleDefault aDefType);
-  static void ShowPrintErrorDialog(nsresult printerror,
-                                   bool aIsPrinting = true);
 
   static bool HasFramesetChild(nsIContent* aContent);
 
@@ -227,9 +223,7 @@ protected:
                                                    nsIFrame*&      aSeqFrame,
                                                    int32_t&        aCount);
 
-  static nsresult FindSelectionBoundsWithList(nsPresContext* aPresContext,
-                                              nsRenderingContext& aRC,
-                                              nsFrameList::Enumerator& aChildFrames,
+  static nsresult FindSelectionBoundsWithList(nsFrameList::Enumerator& aChildFrames,
                                               nsIFrame *      aParentFrame,
                                               nsRect&         aRect,
                                               nsIFrame *&     aStartFrame,
@@ -237,20 +231,14 @@ protected:
                                               nsIFrame *&     aEndFrame,
                                               nsRect&         aEndRect);
 
-  static nsresult FindSelectionBounds(nsPresContext* aPresContext,
-                                      nsRenderingContext& aRC,
-                                      nsIFrame *      aParentFrame,
+  static nsresult FindSelectionBounds(nsIFrame *      aParentFrame,
                                       nsRect&         aRect,
                                       nsIFrame *&     aStartFrame,
                                       nsRect&         aStartRect,
                                       nsIFrame *&     aEndFrame,
                                       nsRect&         aEndRect);
 
-  static nsresult GetPageRangeForSelection(nsIPresShell *        aPresShell,
-                                           nsPresContext*        aPresContext,
-                                           nsRenderingContext&   aRC,
-                                           nsISelection*         aSelection,
-                                           nsIPageSequenceFrame* aPageSeqFrame,
+  static nsresult GetPageRangeForSelection(nsIPageSequenceFrame* aPageSeqFrame,
                                            nsIFrame**            aStartFrame,
                                            int32_t&              aStartPageNum,
                                            nsRect&               aStartRect,
@@ -307,7 +295,7 @@ protected:
   nsresult InitPrintDocConstruction(bool aHandleError);
   void FirePrintPreviewUpdateEvent();
 private:
-  nsPrintEngine& operator=(const nsPrintEngine& aOther) MOZ_DELETE;
+  nsPrintEngine& operator=(const nsPrintEngine& aOther) = delete;
 };
 
 #endif /* nsPrintEngine_h___ */

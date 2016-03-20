@@ -43,11 +43,12 @@ namespace {
 class ArrayBoundsClamperMarker : public TIntermTraverser {
 public:
     ArrayBoundsClamperMarker()
-        : mNeedsClamp(false)
+        : TIntermTraverser(true, false, false),
+          mNeedsClamp(false)
    {
    }
 
-   virtual bool visitBinary(Visit visit, TIntermBinary* node)
+    bool visitBinary(Visit visit, TIntermBinary *node) override
    {
        if (node->getOp() == EOpIndexIndirect)
        {
@@ -77,9 +78,6 @@ ArrayBoundsClamper::ArrayBoundsClamper()
 
 void ArrayBoundsClamper::SetClampingStrategy(ShArrayIndexClampingStrategy clampingStrategy)
 {
-    ASSERT(clampingStrategy == SH_CLAMP_WITH_CLAMP_INTRINSIC ||
-           clampingStrategy == SH_CLAMP_WITH_USER_DEFINED_INT_CLAMP_FUNCTION);
-
     mClampingStrategy = clampingStrategy;
 }
 

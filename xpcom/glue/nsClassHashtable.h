@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -29,10 +30,17 @@ public:
   typedef nsBaseHashtable<KeyClass, nsAutoPtr<T>, T*> base_type;
 
   nsClassHashtable() {}
-  explicit nsClassHashtable(uint32_t aInitSize)
-    : nsBaseHashtable<KeyClass, nsAutoPtr<T>, T*>(aInitSize)
+  explicit nsClassHashtable(uint32_t aInitLength)
+    : nsBaseHashtable<KeyClass, nsAutoPtr<T>, T*>(aInitLength)
   {
   }
+
+  /**
+   * Looks up aKey in the hash table. If it doesn't exist a new object of
+   * KeyClass will be created (using its default constructor) and then
+   * returned.
+   */
+  UserDataType LookupOrAdd(KeyType aKey);
 
   /**
    * @copydoc nsBaseHashtable::Get
@@ -63,6 +71,17 @@ public:
 //
 // nsClassHashtable definitions
 //
+
+template<class KeyClass, class T>
+T*
+nsClassHashtable<KeyClass, T>::LookupOrAdd(KeyType aKey)
+{
+  typename base_type::EntryType* ent = this->PutEntry(aKey);
+  if (!ent->mData) {
+    ent->mData = new T();
+  }
+  return ent->mData;
+}
 
 template<class KeyClass, class T>
 bool
@@ -102,7 +121,6 @@ void
 nsClassHashtable<KeyClass, T>::RemoveAndForget(KeyType aKey, nsAutoPtr<T>& aOut)
 {
   aOut = nullptr;
-  nsAutoPtr<T> ptr;
 
   typename base_type::EntryType* ent = this->GetEntry(aKey);
   if (!ent) {

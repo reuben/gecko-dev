@@ -1,40 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function whenNewWindowLoaded(aOptions, aCallback) {
-  let win = OpenBrowserWindow(aOptions);
-  let gotLoad = false;
-  let gotActivate = Services.focus.activeWindow == win;
-
-  function maybeRunCallback() {
-    if (gotLoad && gotActivate) {
-      executeSoon(function() { aCallback(win); });
-    }
-  }
-
-  if (!gotActivate) {
-    win.addEventListener("activate", function onActivate() {
-      info("Got activate.");
-      win.removeEventListener("activate", onActivate, false);
-      gotActivate = true;
-      maybeRunCallback();
-    }, false);
-  } else {
-    info("Was activated.");
-  }
-
-  Services.obs.addObserver(function observer(aSubject, aTopic) {
-    if (win == aSubject) {
-      info("Delayed startup finished");
-      Services.obs.removeObserver(observer, aTopic);
-      gotLoad = true;
-      maybeRunCallback();
-    }
-  }, "browser-delayed-startup-finished", false);
-
-  return win;
-}
-
 /**
  * Recursively compare two objects and check that every property of expectedObj has the same value
  * on actualObj.
@@ -73,36 +39,49 @@ function getLocalizedPref(aPrefName, aDefault) {
   return aDefault;
 }
 
-function waitForPopupShown(aPopupId, aCallback) {
-  let popup = document.getElementById(aPopupId);
-  info("waitForPopupShown: got popup: " + popup.id);
-  function onPopupShown() {
-    info("onPopupShown");
-    removePopupShownListener();
-    SimpleTest.executeSoon(aCallback);
+function promiseEvent(aTarget, aEventName, aPreventDefault) {
+  function cancelEvent(event) {
+    if (aPreventDefault) {
+      event.preventDefault();
+    }
+
+    return true;
   }
-  function removePopupShownListener() {
-    popup.removeEventListener("popupshown", onPopupShown);
-  }
-  popup.addEventListener("popupshown", onPopupShown);
-  registerCleanupFunction(removePopupShownListener);
+
+  return BrowserTestUtils.waitForEvent(aTarget, aEventName, false, cancelEvent);
 }
 
-function waitForBrowserContextMenu(aCallback) {
-  waitForPopupShown(gBrowser.selectedBrowser.contextMenu, aCallback);
-}
-
-function doOnloadOnce(aCallback) {
-  function doOnloadOnceListener(aEvent) {
-    info("doOnloadOnce: " + aEvent.originalTarget.location);
-    removeDoOnloadOnceListener();
-    SimpleTest.executeSoon(function doOnloadOnceCallback() {
-      aCallback(aEvent);
+function promiseNewEngine(basename, options = {}) {
+  return new Promise((resolve, reject) => {
+    //Default the setAsCurrent option to true.
+    let setAsCurrent =
+      options.setAsCurrent == undefined ? true : options.setAsCurrent;
+    info("Waiting for engine to be added: " + basename);
+    Services.search.init({
+      onInitComplete: function() {
+        let url = getRootDirectory(gTestPath) + basename;
+        let current = Services.search.currentEngine;
+        Services.search.addEngine(url, null, options.iconURL || "", false, {
+          onSuccess: function (engine) {
+            info("Search engine added: " + basename);
+            if (setAsCurrent) {
+              Services.search.currentEngine = engine;
+            }
+            registerCleanupFunction(() => {
+              if (setAsCurrent) {
+                Services.search.currentEngine = current;
+              }
+              Services.search.removeEngine(engine);
+              info("Search engine removed: " + basename);
+            });
+            resolve(engine);
+          },
+          onError: function (errCode) {
+            ok(false, "addEngine failed with error code " + errCode);
+            reject();
+          }
+        });
+      }
     });
-  }
-  function removeDoOnloadOnceListener() {
-    gBrowser.removeEventListener("load", doOnloadOnceListener, true);
-  }
-  gBrowser.addEventListener("load", doOnloadOnceListener, true);
-  registerCleanupFunction(removeDoOnloadOnceListener);
+  });
 }

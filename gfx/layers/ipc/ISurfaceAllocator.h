@@ -30,25 +30,18 @@
 #define MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
 #endif
 
-class gfxSharedImageSurface;
-
-namespace base {
-class Thread;
-}
-
 namespace mozilla {
 namespace ipc {
 class Shmem;
-}
+} // namespace ipc
 namespace gfx {
 class DataSourceSurface;
-}
+} // namespace gfx
 
 namespace layers {
 
 class MaybeMagicGrallocBufferHandle;
-class MemoryTextureClient;
-class MemoryTextureHost;
+class CompositableForwarder;
 
 enum BufferCapabilities {
   DEFAULT_BUFFER_CAPS = 0,
@@ -70,8 +63,8 @@ bool IsSurfaceDescriptorValid(const SurfaceDescriptor& aSurface);
 bool IsSurfaceDescriptorOwned(const SurfaceDescriptor& aDescriptor);
 bool ReleaseOwnedSurfaceDescriptor(const SurfaceDescriptor& aDescriptor);
 
-TemporaryRef<gfx::DrawTarget> GetDrawTargetForDescriptor(const SurfaceDescriptor& aDescriptor, gfx::BackendType aBackend);
-TemporaryRef<gfx::DataSourceSurface> GetSurfaceForDescriptor(const SurfaceDescriptor& aDescriptor);
+already_AddRefed<gfx::DrawTarget> GetDrawTargetForDescriptor(const SurfaceDescriptor& aDescriptor, gfx::BackendType aBackend);
+already_AddRefed<gfx::DataSourceSurface> GetSurfaceForDescriptor(const SurfaceDescriptor& aDescriptor);
 /**
  * An interface used to create and destroy surfaces that are shared with the
  * Compositor process (using shmem, or gralloc, or other platform specific memory)
@@ -85,19 +78,11 @@ class ISurfaceAllocator : public AtomicRefCountedWithFinalize<ISurfaceAllocator>
 {
 public:
   MOZ_DECLARE_REFCOUNTED_TYPENAME(ISurfaceAllocator)
-  ISurfaceAllocator() {}
+  ISurfaceAllocator()
+    : mDefaultMessageLoop(MessageLoop::current())
+  {}
 
   void Finalize();
-
-  /**
-   * Returns the type of backend that is used off the main thread.
-   * We only don't allow changing the backend type at runtime so this value can
-   * be queried once and will not change until Gecko is restarted.
-   *
-   * XXX - With e10s this may not be true anymore. we can have accelerated widgets
-   * and non-accelerated widgets (small popups, etc.)
-   */
-  virtual LayersBackend GetCompositorBackendType() const = 0;
 
   /**
    * Allocate shared memory that can be accessed by only one process at a time.
@@ -160,12 +145,23 @@ public:
 
   void DeallocGrallocBuffer(MaybeMagicGrallocBufferHandle* aHandle);
 
+  void DropGrallocBuffer(MaybeMagicGrallocBufferHandle* aHandle);
+
   virtual bool IPCOpen() const { return true; }
   virtual bool IsSameProcess() const = 0;
+  virtual base::ProcessId ParentPid() const { return base::ProcessId(); }
+
+  virtual bool IsImageBridgeChild() const { return false; }
+
+  virtual MessageLoop * GetMessageLoop() const
+  {
+    return mDefaultMessageLoop;
+  }
 
   // Returns true if aSurface wraps a Shmem.
   static bool IsShmem(SurfaceDescriptor* aSurface);
 
+  virtual CompositableForwarder* AsCompositableForwarder() { return nullptr; }
 protected:
 
   virtual bool IsOnCompositorSide() const = 0;
@@ -177,10 +173,12 @@ protected:
   // This is used to implement an extremely simple & naive heap allocator.
   std::vector<mozilla::ipc::Shmem> mUsedShmems;
 
+  MessageLoop* mDefaultMessageLoop;
+
   friend class AtomicRefCountedWithFinalize<ISurfaceAllocator>;
 };
 
-class GfxMemoryImageReporter MOZ_FINAL : public nsIMemoryReporter
+class GfxMemoryImageReporter final : public nsIMemoryReporter
 {
   ~GfxMemoryImageReporter() {}
 
@@ -212,7 +210,7 @@ public:
   }
 
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                            nsISupports* aData, bool aAnonymize)
+                            nsISupports* aData, bool aAnonymize) override
   {
     return MOZ_COLLECT_REPORT(
       "explicit/gfx/heap-textures", KIND_HEAP, UNITS_BYTES, sAmount,
@@ -220,10 +218,14 @@ public:
   }
 
 private:
-  static mozilla::Atomic<size_t> sAmount;
+  // Typically we use |size_t| in memory reporters, but in the past this
+  // variable has sometimes gone negative due to missing DidAlloc() calls.
+  // Therefore, we use a signed type so that any such negative values show up
+  // as negative in about:memory, rather than as enormous positive numbers.
+  static mozilla::Atomic<ptrdiff_t> sAmount;
 };
 
-} // namespace
-} // namespace
+} // namespace layers
+} // namespace mozilla
 
 #endif

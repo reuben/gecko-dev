@@ -7,19 +7,33 @@
 #define DOM_CAMERA_CAMERAPREFERENCES_H
 
 #include "nsString.h"
+#include "nsIObserver.h"
+#ifdef MOZ_WIDGET_GONK
+#include "mozilla/StaticPtr.h"
+#endif
 
 namespace mozilla {
 
 template<class T> class StaticAutoPtr;
 
 class CameraPreferences
+#ifdef MOZ_WIDGET_GONK
+  : public nsIObserver
+#endif
 {
 public:
+#ifdef MOZ_WIDGET_GONK
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIOBSERVER
+#endif
+
   static bool Initialize();
   static void Shutdown();
 
   static bool GetPref(const char* aPref, nsACString& aVal);
   static bool GetPref(const char* aPref, nsresult& aVal);
+  static bool GetPref(const char* aPref, uint32_t& aVal);
+  static bool GetPref(const char* aPref, bool& aVal);
 
 protected:
   static const uint32_t kPrefNotFound = UINT32_MAX;
@@ -27,11 +41,15 @@ protected:
 
   static void PreferenceChanged(const char* aPref, void* aClosure);
   static nsresult UpdatePref(const char* aPref, nsresult& aVar);
+  static nsresult UpdatePref(const char* aPref, uint32_t& aVar);
   static nsresult UpdatePref(const char* aPref, nsACString& aVar);
+  static nsresult UpdatePref(const char* aPref, bool& aVar);
 
   enum PrefValueType {
-    kPrefValueIsNSResult,
-    kPrefValueIsCString
+    kPrefValueIsNsResult,
+    kPrefValueIsUint32,
+    kPrefValueIsCString,
+    kPrefValueIsBoolean
   };
   struct Pref {
     const char* const           mPref;
@@ -45,6 +63,8 @@ protected:
       void*                     mAsVoid;
       StaticAutoPtr<nsCString>* mAsCString;
       nsresult*                 mAsNsResult;
+      uint32_t*                 mAsUint32;
+      bool*                     mAsBoolean;
     } mValue;
   };
   static Pref sPrefs[];
@@ -56,10 +76,27 @@ protected:
   static nsresult sPrefCameraControlMethodErrorOverride;
   static nsresult sPrefCameraControlAsyncErrorOverride;
 
+  static uint32_t sPrefCameraControlLowMemoryThresholdMB;
+
+  static bool sPrefCameraParametersIsLowMemory;
+
+  static bool sPrefCameraParametersPermission;
+
+#ifdef MOZ_WIDGET_GONK
+  static StaticRefPtr<CameraPreferences> sObserver;
+
+  nsresult PreinitCameraHardware();
+
+protected:
+  // Objects may be instantiated for use as observers.
+  CameraPreferences() { }
+  virtual ~CameraPreferences() { }
+#else
 private:
-  // static class only
+  // Static class only.
   CameraPreferences();
   ~CameraPreferences();
+#endif
 };
 
 } // namespace mozilla

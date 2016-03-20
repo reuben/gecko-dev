@@ -12,6 +12,7 @@
 #include "nsAccUtils.h"
 #include "nsCoreUtils.h"
 #include "nsEventShell.h"
+#include "nsFrameSelection.h"
 
 #include "nsIAccessibleTypes.h"
 #include "nsIDOMDocument.h"
@@ -23,12 +24,12 @@ using namespace mozilla;
 using namespace mozilla::a11y;
 using mozilla::dom::Selection;
 
-struct mozilla::a11y::SelData MOZ_FINAL
+struct mozilla::a11y::SelData final
 {
   SelData(Selection* aSel, int32_t aReason) :
     mSel(aSel), mReason(aReason) {}
 
-  nsRefPtr<Selection> mSel;
+  RefPtr<Selection> mSel;
   int16_t mReason;
 
   NS_INLINE_DECL_REFCOUNTING(SelData)
@@ -153,11 +154,17 @@ SelectionManager::ProcessTextSelChangeEvent(AccEvent* aEvent)
     return;
 
   Selection* selection = caretCntr->DOMSelection();
+
+  // XXX Sometimes we can't get a selection for caretCntr, in that case assume
+  // event->mSel is correct.
+  if (!selection)
+    selection = event->mSel;
+
   mCaretOffset = caretCntr->DOMPointToOffset(selection->GetFocusNode(),
                                              selection->FocusOffset());
   mAccWithCaret = caretCntr;
   if (mCaretOffset != -1) {
-    nsRefPtr<AccCaretMoveEvent> caretMoveEvent =
+    RefPtr<AccCaretMoveEvent> caretMoveEvent =
       new AccCaretMoveEvent(caretCntr, mCaretOffset, aEvent->FromUserInput());
     nsEventShell::FireEvent(caretMoveEvent);
   }
@@ -178,12 +185,11 @@ SelectionManager::NotifySelectionChanged(nsIDOMDocument* aDOMDocument,
     logging::SelChange(aSelection, document, aReason);
 #endif
 
-  // Don't fire events until document is loaded.
-  if (document && document->IsContentLoaded()) {
+  if (document) {
     // Selection manager has longer lifetime than any document accessible,
     // so that we are guaranteed that the notification is processed before
     // the selection manager is destroyed.
-    nsRefPtr<SelData> selData =
+    RefPtr<SelData> selData =
       new SelData(static_cast<Selection*>(aSelection), aReason);
     document->HandleNotification<SelectionManager, SelData>
       (this, &SelectionManager::ProcessSelectionChanged, selData);
@@ -220,7 +226,7 @@ SelectionManager::ProcessSelectionChanged(SelData* aSelData)
   }
 
   if (selection->GetType() == nsISelectionController::SELECTION_NORMAL) {
-    nsRefPtr<AccEvent> event =
+    RefPtr<AccEvent> event =
       new AccTextSelChangeEvent(text, selection, aSelData->mReason);
     text->Document()->FireDelayedEvent(event);
 

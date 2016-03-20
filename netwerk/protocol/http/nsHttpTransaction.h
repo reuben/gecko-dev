@@ -12,12 +12,14 @@
 #include "EventTokenBucket.h"
 #include "nsCOMPtr.h"
 #include "nsThreadUtils.h"
-#include "nsILoadGroup.h"
 #include "nsIInterfaceRequestor.h"
 #include "TimingStruct.h"
+#include "Http2Push.h"
+#include "mozilla/net/DNS.h"
+#include "ARefBase.h"
 
 #ifdef MOZ_WIDGET_GONK
-#include "nsINetworkManager.h"
+#include "nsINetworkInterface.h"
 #include "nsProxyRelease.h"
 #endif
 
@@ -27,35 +29,24 @@ class nsIHttpActivityObserver;
 class nsIEventTarget;
 class nsIInputStream;
 class nsIOutputStream;
+class nsISchedulingContext;
 
-namespace mozilla {
-
-namespace net {
+namespace mozilla { namespace net {
 
 class nsHttpChunkedDecoder;
 class nsHttpRequestHead;
 class nsHttpResponseHead;
-class nsHttpTransaction;
-
-}
-
-template<>
-struct HasDangerousPublicDestructor<net::nsHttpTransaction>
-{
-  static const bool value = true;
-};
-
-namespace net {
 
 //-----------------------------------------------------------------------------
 // nsHttpTransaction represents a single HTTP transaction.  It is thread-safe,
 // intended to run on the socket thread.
 //-----------------------------------------------------------------------------
 
-class nsHttpTransaction : public nsAHttpTransaction
-                        , public ATokenBucketEvent
-                        , public nsIInputStreamCallback
-                        , public nsIOutputStreamCallback
+class nsHttpTransaction final : public nsAHttpTransaction
+                              , public ATokenBucketEvent
+                              , public nsIInputStreamCallback
+                              , public nsIOutputStreamCallback
+                              , public ARefBase
 {
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
@@ -64,7 +55,6 @@ public:
     NS_DECL_NSIOUTPUTSTREAMCALLBACK
 
     nsHttpTransaction();
-    virtual ~nsHttpTransaction();
 
     //
     // called to initialize the transaction
@@ -103,6 +93,7 @@ public:
     nsISupports           *SecurityInfo()   { return mSecurityInfo; }
 
     nsIEventTarget        *ConsumerTarget() { return mConsumerTarget; }
+    nsISupports           *HttpChannel()    { return mChannel; }
 
     void SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks);
 
@@ -110,25 +101,22 @@ public:
     // will drop any reference to the response headers after this call.
     nsHttpResponseHead *TakeResponseHead();
 
+    // Provides a thread safe reference of the connection
+    // nsHttpTransaction::Connection should only be used on the socket thread
+    already_AddRefed<nsAHttpConnection> GetConnectionReference();
+
     // Called to find out if the transaction generated a complete response.
     bool ResponseIsComplete() { return mResponseIsComplete; }
 
     bool      ProxyConnectFailed() { return mProxyConnectFailed; }
 
-    // setting mDontRouteViaWildCard to true means the transaction should only
-    // be dispatched on a specific ConnectionInfo Hash Key (as opposed to a
-    // generic wild card one). That means in the specific case of carrying this
-    // transaction on an HTTP/2 tunnel it will only be dispatched onto an
-    // existing tunnel instead of triggering creation of a new one.
-    void SetDontRouteViaWildCard(bool var) { mDontRouteViaWildCard = var; }
-    bool DontRouteViaWildCard() { return mDontRouteViaWildCard; }
     void EnableKeepAlive() { mCaps |= NS_HTTP_ALLOW_KEEPALIVE; }
+    void MakeSticky() { mCaps |= NS_HTTP_STICKY_CONNECTION; }
 
     // SetPriority() may only be used by the connection manager.
     void    SetPriority(int32_t priority) { mPriority = priority; }
     int32_t    Priority()                 { return mPriority; }
 
-    const TimingStruct& Timings() const { return mTimings; }
     enum Classifier Classification() { return mClassification; }
 
     void PrintDiagnostics(nsCString &log);
@@ -138,15 +126,49 @@ public:
     const TimeStamp GetPendingTime() { return mPendingTime; }
     bool UsesPipelining() const { return mCaps & NS_HTTP_ALLOW_PIPELINING; }
 
-    // overload of nsAHttpTransaction::LoadGroupConnectionInfo()
-    nsILoadGroupConnectionInfo *LoadGroupConnectionInfo() { return mLoadGroupCI.get(); }
-    void SetLoadGroupConnectionInfo(nsILoadGroupConnectionInfo *aLoadGroupCI) { mLoadGroupCI = aLoadGroupCI; }
+    // overload of nsAHttpTransaction::SchedulingContext()
+    nsISchedulingContext *SchedulingContext() override { return mSchedulingContext.get(); }
+    void SetSchedulingContext(nsISchedulingContext *aSchedulingContext);
     void DispatchedAsBlocking();
     void RemoveDispatchedAsBlocking();
 
-    nsHttpTransaction *QueryHttpTransaction() MOZ_OVERRIDE { return this; }
+    nsHttpTransaction *QueryHttpTransaction() override { return this; }
+
+    Http2PushedStream *GetPushedStream() { return mPushedStream; }
+    Http2PushedStream *TakePushedStream()
+    {
+        Http2PushedStream *r = mPushedStream;
+        mPushedStream = nullptr;
+        return r;
+    }
+    void SetPushedStream(Http2PushedStream *push) { mPushedStream = push; }
+    uint32_t InitialRwin() const { return mInitialRwin; };
+    bool ChannelPipeFull() { return mWaitingOnPipeOut; }
+
+    // Locked methods to get and set timing info
+    const TimingStruct Timings();
+    void SetDomainLookupStart(mozilla::TimeStamp timeStamp, bool onlyIfNull = false);
+    void SetDomainLookupEnd(mozilla::TimeStamp timeStamp, bool onlyIfNull = false);
+    void SetConnectStart(mozilla::TimeStamp timeStamp, bool onlyIfNull = false);
+    void SetConnectEnd(mozilla::TimeStamp timeStamp, bool onlyIfNull = false);
+    void SetRequestStart(mozilla::TimeStamp timeStamp, bool onlyIfNull = false);
+    void SetResponseStart(mozilla::TimeStamp timeStamp, bool onlyIfNull = false);
+    void SetResponseEnd(mozilla::TimeStamp timeStamp, bool onlyIfNull = false);
+
+    mozilla::TimeStamp GetDomainLookupStart();
+    mozilla::TimeStamp GetDomainLookupEnd();
+    mozilla::TimeStamp GetConnectStart();
+    mozilla::TimeStamp GetConnectEnd();
+    mozilla::TimeStamp GetRequestStart();
+    mozilla::TimeStamp GetResponseStart();
+    mozilla::TimeStamp GetResponseEnd();
+
+    int64_t GetTransferSize() { return mTransferSize; }
 
 private:
+    friend class DeleteHttpTransaction;
+    virtual ~nsHttpTransaction();
+
     nsresult Restart();
     nsresult RestartInProgress();
     char    *LocateHttpStart(char *buf, uint32_t len,
@@ -170,7 +192,10 @@ private:
 
     bool TimingEnabled() const { return mCaps & NS_HTTP_TIMING_ENABLED; }
 
-    bool ResponseTimeoutEnabled() const MOZ_FINAL;
+    bool ResponseTimeoutEnabled() const final;
+
+    void DisableSpdy() override;
+    void ReuseConnectionOnRestartOK(bool reuseOk) override { mReuseOnRestart = reuseOk; }
 
 private:
     class UpdateSecurityCallbacks : public nsRunnable
@@ -187,11 +212,11 @@ private:
             return NS_OK;
         }
       private:
-        nsRefPtr<nsHttpTransaction> mTrans;
+        RefPtr<nsHttpTransaction> mTrans;
         nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
     };
 
-    Mutex mCallbacksLock;
+    Mutex mLock;
 
     nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
     nsCOMPtr<nsITransportEventSink> mTransportSink;
@@ -199,19 +224,19 @@ private:
     nsCOMPtr<nsISupports>           mSecurityInfo;
     nsCOMPtr<nsIAsyncInputStream>   mPipeIn;
     nsCOMPtr<nsIAsyncOutputStream>  mPipeOut;
-    nsCOMPtr<nsILoadGroupConnectionInfo> mLoadGroupCI;
+    nsCOMPtr<nsISchedulingContext>  mSchedulingContext;
 
     nsCOMPtr<nsISupports>             mChannel;
     nsCOMPtr<nsIHttpActivityObserver> mActivityDistributor;
 
     nsCString                       mReqHeaderBuf;    // flattened request headers
     nsCOMPtr<nsIInputStream>        mRequestStream;
-    uint64_t                        mRequestSize;
+    int64_t                         mRequestSize;
 
-    nsAHttpConnection              *mConnection;      // hard ref
-    nsHttpConnectionInfo           *mConnInfo;        // hard ref
+    RefPtr<nsAHttpConnection>     mConnection;
+    RefPtr<nsHttpConnectionInfo>  mConnInfo;
     nsHttpRequestHead              *mRequestHead;     // weak ref
-    nsHttpResponseHead             *mResponseHead;    // hard ref
+    nsHttpResponseHead             *mResponseHead;    // owning pointer
 
     nsAHttpSegmentReader           *mReader;
     nsAHttpSegmentWriter           *mWriter;
@@ -220,6 +245,7 @@ private:
 
     int64_t                         mContentLength;   // equals -1 if unknown
     int64_t                         mContentRead;     // count of consumed content bytes
+    int64_t                         mTransferSize; // count of received bytes
 
     // After a 304/204 or other "no-content" style response we will skip over
     // up to MAX_INVALID_RESPONSE_BODY_SZ bytes when looking for the next
@@ -228,7 +254,10 @@ private:
     // so far been skipped.
     uint32_t                        mInvalidResponseBytesRead;
 
-    nsHttpChunkedDecoder           *mChunkedDecoder;
+    Http2PushedStream               *mPushedStream;
+    uint32_t                        mInitialRwin;
+
+    nsHttpChunkedDecoder            *mChunkedDecoder;
 
     TimingStruct                    mTimings;
 
@@ -238,17 +267,21 @@ private:
 
     uint16_t                        mRestartCount;        // the number of times this transaction has been restarted
     uint32_t                        mCaps;
-    // mCapsToClear holds flags that should be cleared in mCaps, e.g. unset
-    // NS_HTTP_REFRESH_DNS when DNS refresh request has completed to avoid
-    // redundant requests on the network. To deal with raciness, only unsetting
-    // bitfields should be allowed: 'lost races' will thus err on the
-    // conservative side, e.g. by going ahead with a 2nd DNS refresh.
-    uint32_t                        mCapsToClear;
     enum Classifier                 mClassification;
     int32_t                         mPipelinePosition;
     int64_t                         mMaxPipelineObjectSize;
 
+    // mCapsToClear holds flags that should be cleared in mCaps, e.g. unset
+    // NS_HTTP_REFRESH_DNS when DNS refresh request has completed to avoid
+    // redundant requests on the network. The member itself is atomic, but
+    // access to it from the networking thread may happen either before or
+    // after the main thread modifies it. To deal with raciness, only unsetting
+    // bitfields should be allowed: 'lost races' will thus err on the
+    // conservative side, e.g. by going ahead with a 2nd DNS refresh.
+    Atomic<uint32_t>                mCapsToClear;
+
     nsHttpVersion                   mHttpVersion;
+    uint16_t                        mHttpResponseCode;
 
     // state flags, all logically boolean, but not packed together into a
     // bitfield so as to avoid bitfield-induced races.  See bug 560579.
@@ -269,7 +302,12 @@ private:
     bool                            mPreserveStream;
     bool                            mDispatchedAsBlocking;
     bool                            mResponseTimeoutEnabled;
-    bool                            mDontRouteViaWildCard;
+    bool                            mForceRestart;
+    bool                            mReuseOnRestart;
+    bool                            mContentDecoding;
+    bool                            mContentDecodingCheck;
+    bool                            mDeferredSendProgress;
+    bool                            mWaitingOnPipeOut;
 
     // mClosed           := transaction has been explicitly closed
     // mTransactionDone  := transaction ran to completion or was interrupted
@@ -360,7 +398,7 @@ public:
     // token bucket submission the transaction just posts an event that causes
     // the pending transaction queue to be rerun (and TryToRunPacedRequest() to
     // be run again.
-    void OnTokenBucketAdmitted(); // ATokenBucketEvent
+    void OnTokenBucketAdmitted() override; // ATokenBucketEvent
 
     // CancelPacing() can be used to tell the token bucket to remove this
     // transaction from the list of pending transactions. This is used when a
@@ -379,8 +417,9 @@ private:
     uint64_t                           mCountRecv;
     uint64_t                           mCountSent;
     uint32_t                           mAppId;
+    bool                               mIsInIsolatedMozBrowser;
 #ifdef MOZ_WIDGET_GONK
-    nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
+    nsMainThreadPtrHandle<nsINetworkInfo> mActiveNetworkInfo;
 #endif
     nsresult                           SaveNetworkStats(bool);
     void                               CountRecvBytes(uint64_t recvBytes)
@@ -393,8 +432,36 @@ private:
         mCountSent += sentBytes;
         SaveNetworkStats(false);
     }
+public:
+    void     SetClassOfService(uint32_t cos) { mClassOfService = cos; }
+    uint32_t ClassOfService() { return mClassOfService; }
+private:
+    uint32_t mClassOfService;
+
+public:
+    // setting TunnelProvider to non-null means the transaction should only
+    // be dispatched on a specific ConnectionInfo Hash Key (as opposed to a
+    // generic wild card one). That means in the specific case of carrying this
+    // transaction on an HTTP/2 tunnel it will only be dispatched onto an
+    // existing tunnel instead of triggering creation of a new one.
+    // The tunnel provider is used for ASpdySession::MaybeReTunnel() checks.
+
+    void SetTunnelProvider(ASpdySession *provider) { mTunnelProvider = provider; }
+    ASpdySession *TunnelProvider() { return mTunnelProvider; }
+    nsIInterfaceRequestor *SecurityCallbacks() { return mCallbacks; }
+
+private:
+    RefPtr<ASpdySession> mTunnelProvider;
+
+public:
+    void GetNetworkAddresses(NetAddr &self, NetAddr &peer);
+
+private:
+    NetAddr                         mSelfAddr;
+    NetAddr                         mPeerAddr;
 };
 
-}} // namespace mozilla::net
+} // namespace net
+} // namespace mozilla
 
 #endif // nsHttpTransaction_h__

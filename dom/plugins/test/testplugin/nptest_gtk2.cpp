@@ -45,7 +45,6 @@
 #include <gtk/gtk.h>
 #include <unistd.h>
 
-#include "mozilla/NullPtr.h"
 #include "mozilla/IntentionalCrash.h"
 
  using namespace std;
@@ -69,12 +68,6 @@ bool
 pluginSupportsWindowlessMode()
 {
   return true;
-}
-
-bool
-pluginSupportsAsyncBitmapDrawing()
-{
-  return false;
 }
 
 NPError
@@ -478,8 +471,7 @@ int32_t pluginGetEdge(InstanceData* instanceData, RectEdge edge)
   case EDGE_BOTTOM:
     return pluginY + pluginHeight;
   }
-
-  return NPTEST_INT32_ERROR;
+  MOZ_CRASH("Unexpected RectEdge?!");
 }
 
 #ifdef MOZ_X11

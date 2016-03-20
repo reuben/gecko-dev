@@ -8,11 +8,9 @@ SimpleTest.waitForExplicitFinish();
 browserElementTestHelpers.setEnabledPref(true);
 browserElementTestHelpers.addPermission();
 
-SpecialPowers.setAllAppsLaunchable(true);
-
 function testAppElement(expectAnApp, callback) {
   var iframe = document.createElement('iframe');
-  SpecialPowers.wrap(iframe).mozbrowser = true;
+  iframe.setAttribute('mozbrowser', 'true');
   iframe.setAttribute('mozapp', 'http://example.org/manifest.webapp');
   iframe.addEventListener('mozbrowsershowmodalprompt', function(e) {
     is(e.detail.message == 'app', expectAnApp, e.detail.message);

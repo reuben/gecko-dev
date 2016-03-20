@@ -7,15 +7,18 @@
 #include "nsAboutCache.h"
 #include "nsICacheStorage.h"
 #include "CacheObserver.h"
+#include "nsDOMString.h"
 #include "nsNetUtil.h"
 #include "prprf.h"
 #include "nsEscape.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
 #include "nsAboutProtocolUtils.h"
+#include "nsContentUtils.h"
 #include "nsInputStreamPump.h"
 #include "CacheFileUtils.h"
 #include <algorithm>
+#include "nsIPipe.h"
 
 using namespace mozilla::net;
 
@@ -87,7 +90,9 @@ NS_IMPL_ISUPPORTS(nsAboutCacheEntry,
 // nsAboutCacheEntry::nsIAboutModule
 
 NS_IMETHODIMP
-nsAboutCacheEntry::NewChannel(nsIURI *uri, nsIChannel **result)
+nsAboutCacheEntry::NewChannel(nsIURI* uri,
+                              nsILoadInfo* aLoadInfo,
+                              nsIChannel** result)
 {
     NS_ENSURE_ARG_POINTER(uri);
     nsresult rv;
@@ -95,10 +100,12 @@ nsAboutCacheEntry::NewChannel(nsIURI *uri, nsIChannel **result)
     nsCOMPtr<nsIInputStream> stream;
     rv = GetContentStream(uri, getter_AddRefs(stream));
     if (NS_FAILED(rv)) return rv;
-
-    return NS_NewInputStreamChannel(result, uri, stream,
-                                    NS_LITERAL_CSTRING("text/html"),
-                                    NS_LITERAL_CSTRING("utf-8"));
+    return NS_NewInputStreamChannelInternal(result,
+                                            uri,
+                                            stream,
+                                            NS_LITERAL_CSTRING("text/html"),
+                                            NS_LITERAL_CSTRING("utf-8"),
+                                            aLoadInfo);
 }
 
 NS_IMETHODIMP
@@ -106,6 +113,13 @@ nsAboutCacheEntry::GetURIFlags(nsIURI *aURI, uint32_t *result)
 {
     *result = nsIAboutModule::HIDE_FROM_ABOUTABOUT;
     return NS_OK;
+}
+
+NS_IMETHODIMP
+nsAboutCacheEntry::GetIndexedDBOriginPostfix(nsIURI *aURI, nsAString &result)
+{
+    SetDOMStringToNull(result);
+    return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 //-----------------------------------------------------------------------------
@@ -360,7 +374,7 @@ nsAboutCacheEntry::WriteCacheEntryDescription(nsICacheEntry *entry)
     } else {
         buffer.Append(escapedStr);
     }
-    nsMemory::Free(escapedStr);
+    free(escapedStr);
     buffer.AppendLiteral("</td>\n"
                          "  </tr>\n");
 
@@ -454,7 +468,7 @@ nsAboutCacheEntry::WriteCacheEntryDescription(nsICacheEntry *entry)
         return NS_OK;
     }
 
-    nsRefPtr<nsInputStreamPump> pump;
+    RefPtr<nsInputStreamPump> pump;
     rv = nsInputStreamPump::Create(getter_AddRefs(pump), stream);
     if (NS_FAILED(rv)) {
         return NS_OK; // just ignore
@@ -493,7 +507,7 @@ nsAboutCacheEntry::OnMetaDataElement(char const * key, char const * value)
                            "    <td>");
     char* escapedValue = nsEscapeHTML(value);
     mBuffer->Append(escapedValue);
-    nsMemory::Free(escapedValue);
+    free(escapedValue);
     mBuffer->AppendLiteral("</td>\n"
                            "  </tr>\n");
 

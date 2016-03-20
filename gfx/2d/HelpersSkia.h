@@ -7,36 +7,18 @@
 #define MOZILLA_GFX_HELPERSSKIA_H_
 
 #include "2D.h"
-#include "skia/SkCanvas.h"
-#include "skia/SkDashPathEffect.h"
-#include "skia/SkShader.h"
+#include "skia/include/core/SkCanvas.h"
+#include "skia/include/effects/SkDashPathEffect.h"
+#include "skia/include/core/SkShader.h"
 #ifdef USE_SKIA_GPU
-#include "skia/GrTypes.h"
+#include "skia/include/gpu/GrTypes.h"
 #endif
 #include "mozilla/Assertions.h"
 #include <vector>
+#include "RefPtrSkia.h"
 
 namespace mozilla {
 namespace gfx {
-
-static inline SkBitmap::Config
-GfxFormatToSkiaConfig(SurfaceFormat format)
-{
-  switch (format)
-  {
-    case SurfaceFormat::B8G8R8A8:
-      return SkBitmap::kARGB_8888_Config;
-    case SurfaceFormat::B8G8R8X8:
-      // We probably need to do something here.
-      return SkBitmap::kARGB_8888_Config;
-    case SurfaceFormat::R5G6B5:
-      return SkBitmap::kRGB_565_Config;
-    case SurfaceFormat::A8:
-      return SkBitmap::kA8_Config;
-    default:
-      return SkBitmap::kARGB_8888_Config;
-  }
-}
 
 static inline SkColorType
 GfxFormatToSkiaColorType(SurfaceFormat format)
@@ -48,7 +30,7 @@ GfxFormatToSkiaColorType(SurfaceFormat format)
     case SurfaceFormat::B8G8R8X8:
       // We probably need to do something here.
       return kBGRA_8888_SkColorType;
-    case SurfaceFormat::R5G6B5:
+    case SurfaceFormat::R5G6B5_UINT16:
       return kRGB_565_SkColorType;
     case SurfaceFormat::A8:
       return kAlpha_8_SkColorType;
@@ -58,19 +40,41 @@ GfxFormatToSkiaColorType(SurfaceFormat format)
 }
 
 static inline SurfaceFormat
-SkiaConfigToGfxFormat(SkBitmap::Config config)
+SkiaColorTypeToGfxFormat(SkColorType aColorType, SkAlphaType aAlphaType = kPremul_SkAlphaType)
 {
-  switch (config)
+  switch (aColorType)
   {
-    case SkBitmap::kARGB_8888_Config:
-      return SurfaceFormat::B8G8R8A8;
-    case SkBitmap::kRGB_565_Config:
-      return SurfaceFormat::R5G6B5;
-    case SkBitmap::kA8_Config:
+    case kBGRA_8888_SkColorType:
+      return aAlphaType == kOpaque_SkAlphaType ?
+               SurfaceFormat::B8G8R8X8 : SurfaceFormat::B8G8R8A8;
+    case kRGB_565_SkColorType:
+      return SurfaceFormat::R5G6B5_UINT16;
+    case kAlpha_8_SkColorType:
       return SurfaceFormat::A8;
     default:
       return SurfaceFormat::B8G8R8A8;
   }
+}
+
+static inline SkAlphaType
+GfxFormatToSkiaAlphaType(SurfaceFormat format)
+{
+  switch (format)
+  {
+    case SurfaceFormat::B8G8R8X8:
+    case SurfaceFormat::R5G6B5_UINT16:
+      return kOpaque_SkAlphaType;
+    default:
+      return kPremul_SkAlphaType;
+  }
+}
+
+static inline SkImageInfo
+MakeSkiaImageInfo(const IntSize& aSize, SurfaceFormat aFormat)
+{
+  return SkImageInfo::Make(aSize.width, aSize.height,
+                           GfxFormatToSkiaColorType(aFormat),
+                           GfxFormatToSkiaAlphaType(aFormat));
 }
 
 #ifdef USE_SKIA_GPU
@@ -84,7 +88,7 @@ GfxFormatToGrConfig(SurfaceFormat format)
     case SurfaceFormat::B8G8R8X8:
       // We probably need to do something here.
       return kBGRA_8888_GrPixelConfig;
-    case SurfaceFormat::R5G6B5:
+    case SurfaceFormat::R5G6B5_UINT16:
       return kRGB_565_GrPixelConfig;
     case SurfaceFormat::A8:
       return kAlpha_8_GrPixelConfig;
@@ -138,7 +142,8 @@ StrokeOptionsToPaint(SkPaint& aPaint, const StrokeOptions &aOptions)
 {
   // Skia renders 0 width strokes with a width of 1 (and in black),
   // so we should just skip the draw call entirely.
-  if (!aOptions.mLineWidth) {
+  // Skia does not handle non-finite line widths.
+  if (!aOptions.mLineWidth || !IsFinite(aOptions.mLineWidth)) {
     return false;
   }
   aPaint.setStrokeWidth(SkFloatToScalar(aOptions.mLineWidth));
@@ -163,9 +168,9 @@ StrokeOptionsToPaint(SkPaint& aPaint, const StrokeOptions &aOptions)
       pattern[i] = SkFloatToScalar(aOptions.mDashPattern[i % aOptions.mDashLength]);
     }
 
-    SkDashPathEffect* dash = SkDashPathEffect::Create(&pattern.front(),
-                                                      dashCount, 
-                                                      SkFloatToScalar(aOptions.mDashOffset));
+    SkPathEffect* dash = SkDashPathEffect::Create(&pattern.front(),
+                                                  dashCount,
+                                                  SkFloatToScalar(aOptions.mDashOffset));
     SkSafeUnref(aPaint.setPathEffect(dash));
   }
 
@@ -235,24 +240,39 @@ GfxOpToSkiaOp(CompositionOp op)
   }
 }
 
-static inline SkColor ColorToSkColor(const Color &color, Float aAlpha)
+/* There's quite a bit of inconsistency about
+ * whether float colors should be rounded with .5f.
+ * We choose to do it to match cairo which also
+ * happens to match the Direct3D specs */
+static inline U8CPU ColorFloatToByte(Float color)
 {
   //XXX: do a better job converting to int
-  return SkColorSetARGB(U8CPU(color.a*aAlpha*255.0), U8CPU(color.r*255.0),
-                        U8CPU(color.g*255.0), U8CPU(color.b*255.0));
+  return U8CPU(color*255.f + .5f);
+};
+
+static inline SkColor ColorToSkColor(const Color &color, Float aAlpha)
+{
+  return SkColorSetARGB(ColorFloatToByte(color.a*aAlpha), ColorFloatToByte(color.r),
+                        ColorFloatToByte(color.g), ColorFloatToByte(color.b));
+}
+
+static inline SkPoint
+PointToSkPoint(const Point &aPoint)
+{
+  return SkPoint::Make(SkFloatToScalar(aPoint.x), SkFloatToScalar(aPoint.y));
 }
 
 static inline SkRect
 RectToSkRect(const Rect& aRect)
 {
-  return SkRect::MakeXYWH(SkFloatToScalar(aRect.x), SkFloatToScalar(aRect.y), 
+  return SkRect::MakeXYWH(SkFloatToScalar(aRect.x), SkFloatToScalar(aRect.y),
                           SkFloatToScalar(aRect.width), SkFloatToScalar(aRect.height));
 }
 
 static inline SkRect
 IntRectToSkRect(const IntRect& aRect)
 {
-  return SkRect::MakeXYWH(SkIntToScalar(aRect.x), SkIntToScalar(aRect.y), 
+  return SkRect::MakeXYWH(SkIntToScalar(aRect.x), SkIntToScalar(aRect.y),
                           SkIntToScalar(aRect.width), SkIntToScalar(aRect.height));
 }
 
@@ -283,7 +303,7 @@ SkRectToRect(const SkRect &aRect)
 }
 
 static inline SkShader::TileMode
-ExtendModeToTileMode(ExtendMode aMode)
+ExtendModeToTileMode(ExtendMode aMode, Axis aAxis)
 {
   switch (aMode)
   {
@@ -293,11 +313,39 @@ ExtendModeToTileMode(ExtendMode aMode)
       return SkShader::kRepeat_TileMode;
     case ExtendMode::REFLECT:
       return SkShader::kMirror_TileMode;
+    case ExtendMode::REPEAT_X:
+    {
+      return aAxis == Axis::X_AXIS
+             ? SkShader::kRepeat_TileMode
+             : SkShader::kClamp_TileMode;
+    }
+    case ExtendMode::REPEAT_Y:
+    {
+      return aAxis == Axis::Y_AXIS
+             ? SkShader::kRepeat_TileMode
+             : SkShader::kClamp_TileMode;
+    }
   }
   return SkShader::kClamp_TileMode;
 }
 
+static inline SkPaint::Hinting
+GfxHintingToSkiaHinting(FontHinting aHinting)
+{
+  switch (aHinting) {
+    case FontHinting::NONE:
+      return SkPaint::kNo_Hinting;
+    case FontHinting::LIGHT:
+      return SkPaint::kSlight_Hinting;
+    case FontHinting::NORMAL:
+      return SkPaint::kNormal_Hinting;
+    case FontHinting::FULL:
+      return SkPaint::kFull_Hinting;
+  }
+  return SkPaint::kNormal_Hinting;
 }
-}
+
+} // namespace gfx
+} // namespace mozilla
 
 #endif /* MOZILLA_GFX_HELPERSSKIA_H_ */

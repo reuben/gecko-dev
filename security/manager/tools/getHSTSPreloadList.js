@@ -8,29 +8,19 @@
 // 3. run `[path to]/run-mozilla.sh [path to]/xpcshell \
 //                                  [path to]/getHSTSPreloadlist.js \
 //                                  [absolute path to]/nsSTSPreloadlist.inc'
+// Note: Running this file outputs a new nsSTSPreloadlist.inc in the current
+//       working directory.
 
-// <https://developer.mozilla.org/en/XPConnect/xpcshell/HOWTO>
-// <https://bugzilla.mozilla.org/show_bug.cgi?id=546628>
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
-
-// Register resource://app/ URI
-let ios = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
-let resHandler = ios.getProtocolHandler("resource")
-                 .QueryInterface(Ci.nsIResProtocolHandler);
-let mozDir = Cc["@mozilla.org/file/directory_service;1"]
-             .getService(Ci.nsIProperties)
-             .get("CurProcD", Ci.nsILocalFile);
-let mozDirURI = ios.newFileURI(mozDir);
-resHandler.setSubstitution("app", mozDirURI);
+var Cc = Components.classes;
+var Ci = Components.interfaces;
+var Cu = Components.utils;
+var Cr = Components.results;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource:///modules/XPCOMUtils.jsm");
 
-const SOURCE = "https://src.chromium.org/chrome/trunk/src/net/http/transport_security_state_static.json";
+const SOURCE = "https://chromium.googlesource.com/chromium/src/net/+/master/http/transport_security_state_static.json?format=TEXT";
 const OUTPUT = "nsSTSPreloadList.inc";
 const ERROR_OUTPUT = "nsSTSPreloadList.errors";
 const MINIMUM_REQUIRED_MAX_AGE = 60 * 60 * 24 * 7 * 18;
@@ -70,21 +60,31 @@ function download() {
     req.send();
   }
   catch (e) {
-    throw "ERROR: problem downloading '" + SOURCE + "': " + e;
+    throw new Error(`ERROR: problem downloading '${SOURCE}': ${e}`);
   }
 
   if (req.status != 200) {
-    throw "ERROR: problem downloading '" + SOURCE + "': status " + req.status;
+    throw new Error("ERROR: problem downloading '" + SOURCE + "': status " +
+                    req.status);
   }
 
-  // we have to filter out '//' comments
-  var result = req.responseText.replace(/\/\/[^\n]*\n/g, "");
+  var resultDecoded;
+  try {
+    resultDecoded = atob(req.responseText);
+  }
+  catch (e) {
+    throw new Error("ERROR: could not decode data as base64 from '" + SOURCE +
+                    "': " + e);
+  }
+
+  // we have to filter out '//' comments, while not mangling the json
+  var result = resultDecoded.replace(/^(\s*)?\/\/[^\n]*\n/mg, "");
   var data = null;
   try {
     data = JSON.parse(result);
   }
   catch (e) {
-    throw "ERROR: could not parse data from '" + SOURCE + "': " + e;
+    throw new Error(`ERROR: could not parse data from '${SOURCE}': ${e}`);
   }
   return data;
 }
@@ -93,17 +93,21 @@ function getHosts(rawdata) {
   var hosts = [];
 
   if (!rawdata || !rawdata.entries) {
-    throw "ERROR: source data not formatted correctly: 'entries' not found";
+    throw new Error("ERROR: source data not formatted correctly: 'entries' " +
+                    "not found");
   }
 
-  for (entry of rawdata.entries) {
+  for (let entry of rawdata.entries) {
     if (entry.mode && entry.mode == "force-https") {
       if (entry.name) {
+        // We trim the entry name here to avoid malformed URI exceptions when we
+        // later try to connect to the domain.
+        entry.name = entry.name.trim();
         entry.retries = MAX_RETRIES;
         entry.originalIncludeSubdomains = entry.include_subdomains;
         hosts.push(entry);
       } else {
-        throw "ERROR: entry not formatted correctly: no name found";
+        throw new Error("ERROR: entry not formatted correctly: no name found");
       }
     }
   }
@@ -114,28 +118,28 @@ function getHosts(rawdata) {
 var gSSService = Cc["@mozilla.org/ssservice;1"]
                    .getService(Ci.nsISiteSecurityService);
 
-function processStsHeader(host, header, status) {
+function processStsHeader(host, header, status, securityInfo) {
   var maxAge = { value: 0 };
   var includeSubdomains = { value: false };
   var error = ERROR_NONE;
-  if (header != null) {
+  if (header != null && securityInfo != null) {
     try {
       var uri = Services.io.newURI("https://" + host.name, null, null);
+      var sslStatus = securityInfo.QueryInterface(Ci.nsISSLStatusProvider)
+                                  .SSLStatus;
       gSSService.processHeader(Ci.nsISiteSecurityService.HEADER_HSTS,
-                               uri, header, 0, maxAge, includeSubdomains);
+                               uri, header, sslStatus, 0, maxAge,
+                               includeSubdomains);
     }
     catch (e) {
       dump("ERROR: could not process header '" + header + "' from " +
            host.name + ": " + e + "\n");
       error = e;
     }
-  }
-  else {
-    if (status == 0) {
-      error = ERROR_CONNECTING_TO_HOST;
-    } else {
-      error = ERROR_NO_HSTS_HEADER;
-    }
+  } else if (status == 0) {
+    error = ERROR_CONNECTING_TO_HOST;
+  } else {
+    error = ERROR_NO_HSTS_HEADER;
   }
 
   let forceInclude = (host.forceInclude || host.pins == "google");
@@ -153,19 +157,30 @@ function processStsHeader(host, header, status) {
            originalIncludeSubdomains: host.originalIncludeSubdomains };
 }
 
-function RedirectStopper() {};
+// RedirectAndAuthStopper prevents redirects and HTTP authentication
+function RedirectAndAuthStopper() {}
 
-RedirectStopper.prototype = {
+RedirectAndAuthStopper.prototype = {
   // nsIChannelEventSink
   asyncOnChannelRedirect: function(oldChannel, newChannel, flags, callback) {
-    throw Cr.NS_ERROR_ENTITY_CHANGED;
+    throw new Error(Cr.NS_ERROR_ENTITY_CHANGED);
+  },
+
+  // nsIAuthPrompt2
+  promptAuth: function(channel, level, authInfo) {
+    return false;
+  },
+
+  asyncPromptAuth: function(channel, callback, context, level, authInfo) {
+    throw new Error(Cr.NS_ERROR_NOT_IMPLEMENTED);
   },
 
   getInterface: function(iid) {
     return this.QueryInterface(iid);
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIChannelEventSink])
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIChannelEventSink,
+                                         Ci.nsIAuthPrompt2])
 };
 
 function getHSTSStatus(host, resultList) {
@@ -175,12 +190,13 @@ function getHSTSStatus(host, resultList) {
   var uri = "https://" + host.name + "/";
   req.open("GET", uri, true);
   req.timeout = REQUEST_TIMEOUT;
-  req.channel.notificationCallbacks = new RedirectStopper();
+  req.channel.notificationCallbacks = new RedirectAndAuthStopper();
   req.onreadystatechange = function(event) {
     if (!inResultList && req.readyState == 4) {
       inResultList = true;
       var header = req.getResponseHeader("strict-transport-security");
-      resultList.push(processStsHeader(host, header, req.status));
+      resultList.push(processStsHeader(host, header, req.status,
+                                       req.channel.securityInfo));
     }
   };
 
@@ -193,7 +209,13 @@ function getHSTSStatus(host, resultList) {
 }
 
 function compareHSTSStatus(a, b) {
-  return (a.name > b.name ? 1 : (a.name < b.name ? -1 : 0));
+  if (a.name > b.name) {
+    return 1;
+  }
+  if (a.name < b.name) {
+    return -1;
+  }
+  return 0;
 }
 
 function writeTo(string, fos) {
@@ -283,7 +305,7 @@ function getHSTSStatuses(inHosts, outStatuses) {
   var expectedOutputLength = inHosts.length;
   var tmpOutput = [];
   for (var i = 0; i < MAX_CONCURRENT_REQUESTS && inHosts.length > 0; i++) {
-    var host = inHosts.shift();
+    let host = inHosts.shift();
     dump("spinning off request to '" + host.name + "' (remaining retries: " +
          host.retries + ")\n");
     getHSTSStatus(host, tmpOutput);
@@ -293,13 +315,14 @@ function getHSTSStatuses(inHosts, outStatuses) {
     waitForAResponse(tmpOutput);
     var response = tmpOutput.shift();
     dump("request to '" + response.name + "' finished\n");
-    if (shouldRetry(response))
+    if (shouldRetry(response)) {
       inHosts.push(response);
-    else
+    } else {
       outStatuses.push(response);
+    }
 
     if (inHosts.length > 0) {
-      var host = inHosts.shift();
+      let host = inHosts.shift();
       dump("spinning off request to '" + host.name + "' (remaining retries: " +
            host.retries + ")\n");
       getHSTSStatus(host, tmpOutput);
@@ -354,8 +377,9 @@ function combineLists(newHosts, currentHosts) {
 
 // ****************************************************************************
 // This is where the action happens:
-if (arguments.length < 1) {
-  throw "Usage: getHSTSPreloadList.js <absolute path to current nsSTSPreloadList.inc>";
+if (arguments.length != 1) {
+  throw new Error("Usage: getHSTSPreloadList.js " +
+                  "<absolute path to current nsSTSPreloadList.inc>");
 }
 // get the current preload list
 var currentHosts = readCurrentList(arguments[0]);

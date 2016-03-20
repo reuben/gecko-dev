@@ -19,7 +19,7 @@ class DocAccessible;
 class EventQueue
 {
 protected:
-  EventQueue(DocAccessible* aDocument) : mDocument(aDocument) { }
+  explicit EventQueue(DocAccessible* aDocument) : mDocument(aDocument) { }
 
   /**
    * Put an accessible event into the queue to process it later.
@@ -32,8 +32,8 @@ protected:
   void ProcessEventQueue();
 
 private:
-  EventQueue(const EventQueue&) MOZ_DELETE;
-  EventQueue& operator = (const EventQueue&) MOZ_DELETE;
+  EventQueue(const EventQueue&) = delete;
+  EventQueue& operator = (const EventQueue&) = delete;
 
   // Event queue processing
   /**
@@ -76,10 +76,10 @@ protected:
   DocAccessible* mDocument;
 
   /**
-   * Pending events array. Don't make this an nsAutoTArray; we use
+   * Pending events array. Don't make this an AutoTArray; we use
    * SwapElements() on it.
    */
-  nsTArray<nsRefPtr<AccEvent> > mEvents;
+  nsTArray<RefPtr<AccEvent> > mEvents;
 };
 
 } // namespace a11y

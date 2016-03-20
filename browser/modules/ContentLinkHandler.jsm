@@ -4,9 +4,9 @@
 
 "use strict";
 
-let Cc = Components.classes;
-let Ci = Components.interfaces;
-let Cu = Components.utils;
+var Cc = Components.classes;
+var Ci = Components.interfaces;
+var Cu = Components.utils;
 
 this.EXPORTED_SYMBOLS = [ "ContentLinkHandler" ];
 
@@ -18,14 +18,24 @@ XPCOMUtils.defineLazyModuleGetter(this, "Feeds",
 XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
   "resource://gre/modules/BrowserUtils.jsm");
 
+const SIZES_TELEMETRY_ENUM = {
+  NO_SIZES: 0,
+  ANY: 1,
+  DIMENSION: 2,
+  INVALID: 3,
+};
+
 this.ContentLinkHandler = {
   init: function(chromeGlobal) {
     chromeGlobal.addEventListener("DOMLinkAdded", (event) => {
-      this.onLinkAdded(event, chromeGlobal);
+      this.onLinkEvent(event, chromeGlobal);
+    }, false);
+    chromeGlobal.addEventListener("DOMLinkChanged", (event) => {
+      this.onLinkEvent(event, chromeGlobal);
     }, false);
   },
 
-  onLinkAdded: function(event, chromeGlobal) {
+  onLinkEvent: function(event, chromeGlobal) {
     var link = event.originalTarget;
     var rel = link.rel && link.rel.toLowerCase();
     if (!link || !link.ownerDocument || !rel || !link.href)
@@ -47,7 +57,7 @@ this.ContentLinkHandler = {
       switch (relVal) {
         case "feed":
         case "alternate":
-          if (!feedAdded) {
+          if (!feedAdded && event.type == "DOMLinkAdded") {
             if (!rels.feed && rels.alternate && rels.stylesheet)
               break;
 
@@ -69,11 +79,42 @@ this.ContentLinkHandler = {
             if (!uri)
               break;
 
-            [iconAdded] = chromeGlobal.sendSyncMessage("Link:AddIcon", {url: uri.spec});
+            // Telemetry probes for measuring the sizes attribute
+            // usage and available dimensions.
+            let sizeHistogramTypes = Services.telemetry.
+                                     getHistogramById("LINK_ICON_SIZES_ATTR_USAGE");
+            let sizeHistogramDimension = Services.telemetry.
+                                         getHistogramById("LINK_ICON_SIZES_ATTR_DIMENSION");
+            let sizesType;
+            if (link.sizes.length) {
+              for (let size of link.sizes) {
+                if (size.toLowerCase() == "any") {
+                  sizesType = SIZES_TELEMETRY_ENUM.ANY;
+                  break;
+                } else {
+                  let re = /^([1-9][0-9]*)x[1-9][0-9]*$/i;
+                  let values = re.exec(size);
+                  if (values && values.length > 1) {
+                    sizesType = SIZES_TELEMETRY_ENUM.DIMENSION;
+                    sizeHistogramDimension.add(parseInt(values[1]));
+                  } else {
+                    sizesType = SIZES_TELEMETRY_ENUM.INVALID;
+                    break;
+                  }
+                }
+              }
+            } else {
+              sizesType = SIZES_TELEMETRY_ENUM.NO_SIZES;
+            }
+            sizeHistogramTypes.add(sizesType);
+
+            [iconAdded] = chromeGlobal.sendSyncMessage(
+                            "Link:SetIcon",
+                            {url: uri.spec, loadingPrincipal: link.ownerDocument.nodePrincipal});
           }
           break;
         case "search":
-          if (!searchAdded) {
+          if (!searchAdded && event.type == "DOMLinkAdded") {
             var type = link.type && link.type.toLowerCase();
             type = type.replace(/^\s+|\s*(?:;.*)?$/g, "");
 
@@ -105,7 +146,7 @@ this.ContentLinkHandler = {
       /^about:blocked\?/,
       /^about:certerror\?/,
       /^about:home$/,
-    ].some(function (re) re.test(targetDoc.documentURI));
+    ].some(re => re.test(targetDoc.documentURI));
 
     if (!isAllowedPage || !uri.schemeIs("chrome")) {
       var ssm = Services.scriptSecurityManager;
@@ -125,7 +166,7 @@ this.ContentLinkHandler = {
     }
 
     // Security says okay, now ask content policy
-    if (contentPolicy.shouldLoad(Ci.nsIContentPolicy.TYPE_IMAGE,
+    if (contentPolicy.shouldLoad(Ci.nsIContentPolicy.TYPE_INTERNAL_IMAGE,
                                  uri, targetDoc.documentURIObject,
                                  aLink, aLink.type, null)
                                  != Ci.nsIContentPolicy.ACCEPT)

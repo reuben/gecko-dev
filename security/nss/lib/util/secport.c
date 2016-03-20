@@ -321,7 +321,7 @@ PORT_FreeArena(PLArenaPool *arena, PRBool zero)
     }
     if (!checkedEnv) {
 	/* no need for thread protection here */
-	doFreeArenaPool = (PR_GetEnv("NSS_DISABLE_ARENA_FREE_LIST") == NULL);
+	doFreeArenaPool = (PR_GetEnvSecure("NSS_DISABLE_ARENA_FREE_LIST") == NULL);
 	checkedEnv = PR_TRUE;
     }
     if (zero) {
@@ -466,7 +466,7 @@ port_ArenaRelease(PLArenaPool *arena, void *mark, PRBool zero)
 	PZ_Lock(pool->lock);
 #ifdef THREADMARK
 	{
-	    threadmark_mark **pw, *tm;
+	    threadmark_mark **pw;
 
 	    if (PR_GetCurrentThread() != pool->marking_thread ) {
 		PZ_Unlock(pool->lock);
@@ -488,7 +488,6 @@ port_ArenaRelease(PLArenaPool *arena, void *mark, PRBool zero)
 		return /* no error indication available */ ;
 	    }
 
-	    tm = *pw;
 	    *pw = (threadmark_mark *)NULL;
 
 	    if (zero) {
@@ -536,7 +535,7 @@ PORT_ArenaUnmark(PLArenaPool *arena, void *mark)
 #ifdef THREADMARK
     PORTArenaPool *pool = (PORTArenaPool *)arena;
     if (ARENAPOOL_MAGIC == pool->magic ) {
-	threadmark_mark **pw, *tm;
+	threadmark_mark **pw;
 
 	PZ_Lock(pool->lock);
 
@@ -560,7 +559,6 @@ PORT_ArenaUnmark(PLArenaPool *arena, void *mark)
 	    return /* no error indication available */ ;
 	}
 
-	tm = *pw;
 	*pw = (threadmark_mark *)NULL;
 
 	if (! pool->first_mark ) {

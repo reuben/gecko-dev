@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,8 +13,9 @@
 
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
+#include "mozilla/RefPtr.h"
 
-class nsSimpleArrayEnumerator MOZ_FINAL : public nsISimpleEnumerator
+class nsSimpleArrayEnumerator final : public nsISimpleEnumerator
 {
 public:
   // nsISupports interface
@@ -23,7 +25,7 @@ public:
   NS_DECL_NSISIMPLEENUMERATOR
 
   // nsSimpleArrayEnumerator methods
-  nsSimpleArrayEnumerator(nsIArray* aValueArray)
+  explicit nsSimpleArrayEnumerator(nsIArray* aValueArray)
     : mValueArray(aValueArray)
     , mIndex(0)
   {
@@ -90,12 +92,8 @@ nsSimpleArrayEnumerator::GetNext(nsISupports** aResult)
 nsresult
 NS_NewArrayEnumerator(nsISimpleEnumerator** aResult, nsIArray* aArray)
 {
-  nsSimpleArrayEnumerator* enumer = new nsSimpleArrayEnumerator(aArray);
-  if (!enumer) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  NS_ADDREF(*aResult = enumer);
+  RefPtr<nsSimpleArrayEnumerator> enumer = new nsSimpleArrayEnumerator(aArray);
+  enumer.forget(aResult);
   return NS_OK;
 }
 
@@ -105,7 +103,7 @@ NS_NewArrayEnumerator(nsISimpleEnumerator** aResult, nsIArray* aArray)
 // creates a snapshot of the array in question
 // you MUST use NS_NewArrayEnumerator to create this, so that
 // allocation is done correctly
-class nsCOMArrayEnumerator MOZ_FINAL : public nsISimpleEnumerator
+class nsCOMArrayEnumerator final : public nsISimpleEnumerator
 {
 public:
   // nsISupports interface
@@ -209,11 +207,7 @@ nsresult
 NS_NewArrayEnumerator(nsISimpleEnumerator** aResult,
                       const nsCOMArray_base& aArray)
 {
-  nsCOMArrayEnumerator* enumerator = new (aArray) nsCOMArrayEnumerator();
-  if (!enumerator) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  NS_ADDREF(*aResult = enumerator);
+  RefPtr<nsCOMArrayEnumerator> enumerator = new (aArray) nsCOMArrayEnumerator();
+  enumerator.forget(aResult);
   return NS_OK;
 }

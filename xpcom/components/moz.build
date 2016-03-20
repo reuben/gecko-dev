@@ -29,27 +29,30 @@ EXPORTS.mozilla += [
 # nsCategoryManager.cpp and nsComponentManager.cpp cannot be built in
 # unified mode because they use thea PL_ARENA_CONST_ALIGN_MASK macro
 # with plarena.h.
-# nsNativeComponentLoader.cpp cannot be built in unified mode because it
-# forces NSPR logging.
 SOURCES += [
-    'ManifestParser.cpp',
     'nsCategoryManager.cpp',
     'nsComponentManager.cpp',
-    'nsNativeComponentLoader.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
+UNIFIED_SOURCES += [
+    'ManifestParser.cpp',
+    'nsNativeModuleLoader.cpp',
+]
 
-MSVC_ENABLE_PGO = True
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wshadow']
 
-FINAL_LIBRARY = 'xpcom_core'
+FINAL_LIBRARY = 'xul'
 
-GENERATED_INCLUDES += ['..']
 LOCAL_INCLUDES += [
+    '!..',
     '../base',
     '../build',
     '../ds',
-    '../reflect/xptinfo/src',
-    '/chrome/src',
+    '../reflect/xptinfo',
+    '/chrome',
     '/modules/libjar',
 ]
+
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+    CXXFLAGS += CONFIG['TK_CFLAGS']

@@ -23,14 +23,16 @@ class HTMLListAccessible : public HyperTextAccessibleWrap
 public:
   HTMLListAccessible(nsIContent* aContent, DocAccessible* aDoc) :
     HyperTextAccessibleWrap(aContent, aDoc) { mGenericTypes |= eList; }
-  virtual ~HTMLListAccessible() { }
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
   // Accessible
-  virtual a11y::role NativeRole();
-  virtual uint64_t NativeState();
+  virtual a11y::role NativeRole() override;
+  virtual uint64_t NativeState() override;
+
+protected:
+  virtual ~HTMLListAccessible() { }
 };
 
 
@@ -41,30 +43,28 @@ class HTMLLIAccessible : public HyperTextAccessibleWrap
 {
 public:
   HTMLLIAccessible(nsIContent* aContent, DocAccessible* aDoc);
-  virtual ~HTMLLIAccessible() { }
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
-  // nsIAccessible
-  NS_IMETHOD GetBounds(int32_t* aX, int32_t* aY,
-                       int32_t* aWidth, int32_t* aHeight);
-
   // Accessible
-  virtual void Shutdown();
-  virtual a11y::role NativeRole();
-  virtual uint64_t NativeState();
+  virtual void Shutdown() override;
+  virtual nsIntRect Bounds() const override;
+  virtual a11y::role NativeRole() override;
+  virtual uint64_t NativeState() override;
 
   // HTMLLIAccessible
   HTMLListBulletAccessible* Bullet() const { return mBullet; }
   void UpdateBullet(bool aHasBullet);
 
 protected:
+  virtual ~HTMLLIAccessible() { }
+
   // Accessible
-  virtual void CacheChildren();
+  virtual void CacheChildren() override;
 
 private:
-  nsRefPtr<HTMLListBulletAccessible> mBullet;
+  RefPtr<HTMLListBulletAccessible> mBullet;
 };
 
 
@@ -78,12 +78,12 @@ public:
   virtual ~HTMLListBulletAccessible() { }
 
   // Accessible
-  virtual nsIFrame* GetFrame() const;
-  virtual ENameValueFlag Name(nsString& aName);
-  virtual a11y::role NativeRole();
-  virtual uint64_t NativeState();
+  virtual nsIFrame* GetFrame() const override;
+  virtual ENameValueFlag Name(nsString& aName) override;
+  virtual a11y::role NativeRole() override;
+  virtual uint64_t NativeState() override;
   virtual void AppendTextTo(nsAString& aText, uint32_t aStartOffset = 0,
-                            uint32_t aLength = UINT32_MAX);
+                            uint32_t aLength = UINT32_MAX) override;
 
   // HTMLListBulletAccessible
 

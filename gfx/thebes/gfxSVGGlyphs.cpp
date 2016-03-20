@@ -19,15 +19,15 @@
 #include "nsStringStream.h"
 #include "nsStreamUtils.h"
 #include "nsIPrincipal.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/LoadInfo.h"
 #include "nsSVGUtils.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsHostObjectProtocolHandler.h"
 #include "nsContentUtils.h"
 #include "gfxFont.h"
 #include "nsSMILAnimationController.h"
 #include "gfxContext.h"
-#include "gfxColor.h"
 #include "harfbuzz/hb.h"
 
 #define SVG_CONTENT_TYPE NS_LITERAL_CSTRING("image/svg+xml")
@@ -39,7 +39,7 @@ typedef mozilla::dom::Element Element;
 
 mozilla::gfx::UserDataKey gfxTextContextPaint::sUserDataKey;
 
-const gfxRGBA SimpleTextContextPaint::sZero = gfxRGBA(0.0f, 0.0f, 0.0f, 0.0f);
+/* static */ const Color SimpleTextContextPaint::sZero = Color();
 
 gfxSVGGlyphs::gfxSVGGlyphs(hb_blob_t *aSVGTable, gfxFontEntry *aFontEntry)
     : mSVGData(aSVGTable)
@@ -146,7 +146,7 @@ gfxSVGGlyphsDocument::SetupPresentation()
     rv = docLoaderFactory->CreateInstanceForDocument(nullptr, mDocument, nullptr, getter_AddRefs(viewer));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = viewer->Init(nullptr, nsIntRect(0, 0, 1000, 1000));
+    rv = viewer->Init(nullptr, gfx::IntRect(0, 0, 1000, 1000));
     if (NS_SUCCEEDED(rv)) {
         rv = viewer->Open(nullptr, nullptr);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -341,14 +341,15 @@ gfxSVGGlyphsDocument::ParseDocument(const uint8_t *aBuffer, uint32_t aBufLen)
 
     nsCOMPtr<nsIURI> uri;
     nsHostObjectProtocolHandler::GenerateURIString(NS_LITERAL_CSTRING(FONTTABLEURI_SCHEME),
+                                                   nullptr,
                                                    mSVGGlyphsDocumentURI);
  
     rv = NS_NewURI(getter_AddRefs(uri), mSVGGlyphsDocumentURI);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCOMPtr<nsIPrincipal> principal;
-    nsContentUtils::GetSecurityManager()->
-        GetNoAppCodebasePrincipal(uri, getter_AddRefs(principal));
+    nsCOMPtr<nsIPrincipal> principal =
+      do_CreateInstance("@mozilla.org/nullprincipal;1", &rv);
+    NS_ENSURE_TRUE(principal, NS_ERROR_FAILURE);
 
     nsCOMPtr<nsIDOMDocument> domDoc;
     rv = NS_NewDOMDocument(getter_AddRefs(domDoc),
@@ -367,11 +368,15 @@ gfxSVGGlyphsDocument::ParseDocument(const uint8_t *aBuffer, uint32_t aBufLen)
     }
 
     nsCOMPtr<nsIChannel> channel;
-    rv = NS_NewInputStreamChannel(getter_AddRefs(channel), uri, nullptr /* stream */,
-                                  SVG_CONTENT_TYPE, UTF8_CHARSET);
+    rv = NS_NewInputStreamChannel(getter_AddRefs(channel),
+                                  uri,
+                                  nullptr, //aStream
+                                  principal,
+                                  nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL,
+                                  nsIContentPolicy::TYPE_OTHER,
+                                  SVG_CONTENT_TYPE,
+                                  UTF8_CHARSET);
     NS_ENSURE_SUCCESS(rv, rv);
-
-    channel->SetOwner(principal);
 
     // Set this early because various decisions during page-load depend on it.
     document->SetIsBeingUsedAsImage();

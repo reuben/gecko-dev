@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,17 +10,17 @@
 #include "nsAutoPtr.h"
 #include "nsString.h"
 
-class nsIDOMFile;
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
 namespace dom {
 
+class BlobImpl;
 class Directory;
 
 class FileSystemBase
 {
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FileSystemBase)
+  NS_INLINE_DECL_REFCOUNTING(FileSystemBase)
 public:
 
   // Create file system object from its string representation.
@@ -39,21 +39,27 @@ public:
     return mString;
   }
 
-  virtual nsPIDOMWindow*
+  virtual nsPIDOMWindowInner*
   GetWindow() const;
 
-  /*
-   * Create nsIFile object with the given real path (absolute DOM path).
+  /**
+   * Create nsIFile object from the given real path (absolute DOM path).
    */
-  virtual already_AddRefed<nsIFile>
-  GetLocalFile(const nsAString& aRealPath) const = 0;
+  already_AddRefed<nsIFile>
+  GetLocalFile(const nsAString& aRealPath) const;
 
   /*
    * Get the virtual name of the root directory. This name will be exposed to
    * the content page.
    */
-  virtual const nsAString&
-  GetRootName() const = 0;
+  virtual void
+  GetRootName(nsAString& aRetval) const = 0;
+
+  const nsAString&
+  GetLocalRootPath() const
+  {
+    return mLocalRootPath;
+  }
 
   bool
   IsShutdown() const
@@ -72,8 +78,8 @@ public:
    * If succeeded, returns true. Otherwise, returns false and set aRealPath to
    * empty string.
    */
-  virtual bool
-  GetRealPath(nsIDOMFile* aFile, nsAString& aRealPath) const = 0;
+  bool
+  GetRealPath(BlobImpl* aFile, nsAString& aRealPath) const;
 
   /*
    * Get the permission name required to access this file system.
@@ -85,12 +91,29 @@ public:
   }
 
   bool
-  IsTesting() const
+  RequiresPermissionChecks() const
   {
-    return mIsTesting;
+    return mRequiresPermissionChecks;
   }
+
+  // CC methods
+  virtual void Unlink() {}
+  virtual void Traverse(nsCycleCollectionTraversalCallback &cb) {}
+
 protected:
   virtual ~FileSystemBase();
+
+  bool
+  LocalPathToRealPath(const nsAString& aLocalPath, nsAString& aRealPath) const;
+
+  // The local path of the root (i.e. the OS path, with OS path separators, of
+  // the OS directory that acts as the root of this OSFileSystem).
+  // Only available in the parent process.
+  // In the child process, we don't use it and its value should be empty.
+  nsString mLocalRootPath;
+
+  // The same, but with path separators normalized to "/".
+  nsString mNormalizedLocalRootPath;
 
   // The string representation of the file system.
   nsString mString;
@@ -100,7 +123,7 @@ protected:
   // The permission name required to access the file system.
   nsCString mPermission;
 
-  bool mIsTesting;
+  bool mRequiresPermissionChecks;
 };
 
 } // namespace dom

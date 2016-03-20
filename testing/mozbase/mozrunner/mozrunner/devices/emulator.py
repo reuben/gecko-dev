@@ -7,6 +7,7 @@ import datetime
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -17,7 +18,7 @@ from .emulator_battery import EmulatorBattery
 from .emulator_geo import EmulatorGeo
 from .emulator_screen import EmulatorScreen
 from ..utils import uses_marionette
-from ..errors import TimeoutException, ScriptTimeoutException
+from ..errors import TimeoutException
 
 class ArchContext(object):
     def __init__(self, arch, context, binary=None):
@@ -45,19 +46,17 @@ class Emulator(Device):
     telnet = None
 
     def __init__(self, app_ctx, arch, resolution=None, sdcard=None, userdata=None,
-                 logdir=None, no_window=None, binary=None):
-        Device.__init__(self, app_ctx)
+                 no_window=None, binary=None, **kwargs):
+        Device.__init__(self, app_ctx, **kwargs)
 
         self.arch = ArchContext(arch, self.app_ctx, binary=binary)
         self.resolution = resolution or '320x480'
+        self.tmpdir = tempfile.mkdtemp()
         self.sdcard = None
         if sdcard:
             self.sdcard = self.create_sdcard(sdcard)
-        self.userdata = os.path.join(self.arch.sysdir, 'userdata.img')
-        if userdata:
-            self.userdata = tempfile.NamedTemporaryFile(prefix='qemu-userdata')
-            shutil.copyfile(userdata, self.userdata)
-        self.logdir = logdir
+        self.userdata = tempfile.NamedTemporaryFile(prefix='userdata-qemu', dir=self.tmpdir)
+        self.initdata = userdata if userdata else os.path.join(self.arch.sysdir, 'userdata.img')
         self.no_window = no_window
 
         self.battery = EmulatorBattery(self)
@@ -72,7 +71,9 @@ class Emulator(Device):
         qemu_args = [self.arch.binary,
                      '-kernel', self.arch.kernel,
                      '-sysdir', self.arch.sysdir,
-                     '-data', self.userdata]
+                     '-data', self.userdata.name,
+                     '-initdata', self.initdata,
+                     '-wipe-data']
         if self.no_window:
             qemu_args.append('-no-window')
         if self.sdcard:
@@ -85,14 +86,19 @@ class Emulator(Device):
                           '-qemu'] + self.arch.extra_args)
         return qemu_args
 
-    def _get_online_devices(self):
-        return set([d[0] for d in self.dm.devices() if d[1] != 'offline'])
-
     def start(self):
         """
         Starts a new emulator.
         """
-        original_devices = self._get_online_devices()
+        if self.proc:
+            return
+
+        original_devices = set(self._get_online_devices())
+
+        # QEMU relies on atexit() to remove temporary files, which does not
+        # work since mozprocess uses SIGKILL to kill the emulator process.
+        # Use a customized temporary directory so we can clean it up.
+        os.environ['ANDROID_TMP'] = self.tmpdir
 
         qemu_log = None
         qemu_proc_args = {}
@@ -107,38 +113,35 @@ class Emulator(Device):
         self.proc = ProcessHandler(self.args, **qemu_proc_args)
         self.proc.run()
 
-        devices = self._get_online_devices()
+        devices = set(self._get_online_devices())
         now = datetime.datetime.now()
         while (devices - original_devices) == set([]):
             time.sleep(1)
-            if datetime.datetime.now() - now > datetime.timedelta(seconds=60):
+            # Sometimes it takes more than 60s to launch emulator, so we
+            # increase timeout value to 180s. Please see bug 1143380.
+            if datetime.datetime.now() - now > datetime.timedelta(seconds=180):
                 raise TimeoutException('timed out waiting for emulator to start')
-            devices = self._get_online_devices()
-        self.connect(devices - original_devices)
+            devices = set(self._get_online_devices())
+        devices = devices - original_devices
+        self.serial = devices.pop()
+        self.connect()
 
-    def connect(self, devices=None):
-        """
-        Connects to an already running emulator.
-        """
-        devices = list(devices or self._get_online_devices())
-        serial = [d for d in devices if d.startswith('emulator')][0]
-        self.dm._deviceSerial = serial
-        self.dm.connect()
-        self.port = int(serial[serial.rindex('-')+1:])
+    def _get_online_devices(self):
+        return set([d[0] for d in self.dm.devices() if d[1] != 'offline' if d[0].startswith('emulator')])
 
+    def connect(self):
+        """
+        Connects to a running device. If no serial was specified in the
+        constructor, defaults to the first entry in `adb devices`.
+        """
+        if self.connected:
+            return
+
+        Device.connect(self)
+
+        self.port = int(self.serial[self.serial.rindex('-')+1:])
         self.geo.set_default_location()
         self.screen.initialize()
-
-        print self.logdir
-        if self.logdir:
-            # save logcat
-            logcat_log = os.path.join(self.logdir, '%s.log' % serial)
-            if os.path.isfile(logcat_log):
-                self._rotate_log(logcat_log)
-            logcat_args = [self.app_ctx.adb, '-s', '%s' % serial,
-                           'logcat', '-v', 'threadtime']
-            self.logcat_proc = ProcessHandler(logcat_args, logfile=logcat_log)
-            self.logcat_proc.run()
 
         # setup DNS fix for networking
         self.app_ctx.dm.shellCheckOutput(['setprop', 'net.dns1', '10.0.2.3'])
@@ -150,7 +153,7 @@ class Emulator(Device):
         :param sdcard_size: Size of partition to create, e.g '10MB'.
         """
         mksdcard = self.app_ctx.which('mksdcard')
-        path = tempfile.mktemp(prefix='sdcard')
+        path = tempfile.mktemp(prefix='sdcard', dir=self.tmpdir)
         sdargs = [mksdcard, '-l', 'mySdCard', sdcard_size, path]
         sd = subprocess.Popen(sdargs, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         retcode = sd.wait()
@@ -168,28 +171,9 @@ class Emulator(Device):
             self.proc.kill()
             self.proc = None
 
-        # Remove temporary sdcard
-        if self.sdcard and os.path.isfile(self.sdcard):
-            os.remove(self.sdcard)
-
-    def _rotate_log(self, srclog, index=1):
-        """
-        Rotate a logfile, by recursively rotating logs further in the sequence,
-        deleting the last file if necessary.
-        """
-        basename = os.path.basename(srclog)
-        basename = basename[:-len('.log')]
-        if index > 1:
-            basename = basename[:-len('.1')]
-        basename = '%s.%d.log' % (basename, index)
-
-        destlog = os.path.join(self.logdir, basename)
-        if os.path.isfile(destlog):
-            if index == 3:
-                os.remove(destlog)
-            else:
-                self._rotate_log(destlog, index+1)
-        shutil.move(srclog, destlog)
+        # Remove temporary files
+        self.userdata.close()
+        shutil.rmtree(self.tmpdir)
 
     # TODO this function is B2G specific and shouldn't live here
     @uses_marionette
@@ -207,30 +191,19 @@ waitFor(
     function() { return isSystemMessageListenerReady(); }
 );
             """)
-        except ScriptTimeoutException:
+        except:
+            # Look for ScriptTimeoutException this way to avoid a
+            # dependency on the marionette python client.
+            exc_name = sys.exc_info()[0].__name__
+            if exc_name != 'ScriptTimeoutException':
+                raise
+
             print 'timed out'
             # We silently ignore the timeout if it occurs, since
             # isSystemMessageListenerReady() isn't available on
             # older emulators.  45s *should* be enough of a delay
             # to allow telephony API's to work.
             pass
-        print '...done'
-
-    # TODO this function is B2G specific and shouldn't live here
-    @uses_marionette
-    def wait_for_homescreen(self, marionette):
-        print 'waiting for homescreen...'
-
-        marionette.set_context(marionette.CONTEXT_CONTENT)
-        marionette.execute_async_script("""
-log('waiting for mozbrowserloadend');
-window.addEventListener('mozbrowserloadend', function loaded(aEvent) {
-  log('received mozbrowserloadend for ' + aEvent.target.src);
-  if (aEvent.target.src.indexOf('ftu') != -1 || aEvent.target.src.indexOf('homescreen') != -1) {
-    window.removeEventListener('mozbrowserloadend', loaded);
-    marionetteScriptFinished();
-  }
-});""", script_timeout=120000)
         print '...done'
 
     def _get_telnet_response(self, command=None):

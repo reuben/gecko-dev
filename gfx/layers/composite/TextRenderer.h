@@ -22,8 +22,8 @@ class TextRenderer
 public:
   NS_INLINE_DECL_REFCOUNTING(TextRenderer)
 
-  TextRenderer(Compositor *aCompositor)
-    : mCompositor(aCompositor)
+  explicit TextRenderer(Compositor *aCompositor)
+    : mCompositor(aCompositor), mMap({nullptr, 0})
   {
   }
 
@@ -35,6 +35,8 @@ public:
 
 private:
 
+  // Note that this may still fail to set mGlyphBitmaps to a valid value
+  // if the underlying CreateDataSourceSurface fails for some reason.
   void EnsureInitialized();
 
   RefPtr<Compositor> mCompositor;
@@ -42,7 +44,7 @@ private:
   gfx::DataSourceSurface::MappedSurface mMap;
 };
 
-}
-}
+} // namespace layers
+} // namespace mozilla
 
 #endif

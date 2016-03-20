@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -11,7 +11,7 @@
 #include "nsWeakReference.h"
 #include "nsCOMPtr.h"
 
-class nsWeakReference MOZ_FINAL : public nsIWeakReference
+class nsWeakReference final : public nsIWeakReference
 {
 public:
   // nsISupports...
@@ -19,12 +19,12 @@ public:
 
   // nsIWeakReference...
   NS_DECL_NSIWEAKREFERENCE
-  virtual size_t SizeOfOnlyThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  virtual size_t SizeOfOnlyThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
 
 private:
   friend class nsSupportsWeakReference;
 
-  nsWeakReference(nsSupportsWeakReference* aReferent)
+  explicit nsWeakReference(nsSupportsWeakReference* aReferent)
     : mReferent(aReferent)
     // ...I can only be constructed by an |nsSupportsWeakReference|
   {
@@ -45,7 +45,7 @@ private:
     mReferent = 0;
   }
 
-  nsSupportsWeakReference*  mReferent;
+  nsSupportsWeakReference* MOZ_NON_OWNING_REF mReferent;
 };
 
 nsresult
@@ -66,7 +66,7 @@ nsQueryReferent::operator()(const nsIID& aIID, void** aAnswer) const
   return status;
 }
 
-NS_COM_GLUE nsIWeakReference*  // or else |already_AddRefed<nsIWeakReference>|
+nsIWeakReference*  // or else |already_AddRefed<nsIWeakReference>|
 NS_GetWeakReference(nsISupports* aInstancePtr, nsresult* aErrorPtr)
 {
   nsresult status;
@@ -90,7 +90,7 @@ NS_GetWeakReference(nsISupports* aInstancePtr, nsresult* aErrorPtr)
   return result;
 }
 
-NS_COM_GLUE nsresult
+nsresult
 nsSupportsWeakReference::GetWeakReference(nsIWeakReference** aInstancePtr)
 {
   if (!aInstancePtr) {

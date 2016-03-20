@@ -11,6 +11,28 @@
 #include "nsCoord.h"
 #include "nsStyleConsts.h"
 
+namespace mozilla {
+
+class WritingMode;
+
+// Logical axis, edge and side constants for use in various places.
+enum LogicalAxis {
+  eLogicalAxisBlock  = 0x0,
+  eLogicalAxisInline = 0x1
+};
+enum LogicalEdge {
+  eLogicalEdgeStart  = 0x0,
+  eLogicalEdgeEnd    = 0x1
+};
+enum LogicalSide {
+  eLogicalSideBStart = (eLogicalAxisBlock  << 1) | eLogicalEdgeStart,  // 0x0
+  eLogicalSideBEnd   = (eLogicalAxisBlock  << 1) | eLogicalEdgeEnd,    // 0x1
+  eLogicalSideIStart = (eLogicalAxisInline << 1) | eLogicalEdgeStart,  // 0x2
+  eLogicalSideIEnd   = (eLogicalAxisInline << 1) | eLogicalEdgeEnd     // 0x3
+};
+
+} // namespace mozilla
+
 enum nsStyleUnit : uint8_t {
   eStyleUnit_Null         = 0,      // (no value) value is not specified
   eStyleUnit_Normal       = 1,      // (no value)
@@ -68,21 +90,25 @@ public:
     bool operator!=(const CalcValue& aOther) const {
       return !(*this == aOther);
     }
+
+    // If this returns true the value is definitely zero. It it returns false
+    // it might be zero. So it's best used for conservative optimization.
+    bool IsDefinitelyZero() const { return mLength == 0 && mPercent == 0; }
   };
 
   // Reference counted calc() value.  This is the type that is used to store
   // the calc() value in nsStyleCoord.
-  struct Calc MOZ_FINAL : public CalcValue {
+  struct Calc final : public CalcValue {
     NS_INLINE_DECL_REFCOUNTING(Calc)
     Calc() {}
 
   private:
-    Calc(const Calc&) MOZ_DELETE;
+    Calc(const Calc&) = delete;
     ~Calc() {}
-    Calc& operator=(const Calc&) MOZ_DELETE;
+    Calc& operator=(const Calc&) = delete;
   };
 
-  nsStyleCoord(nsStyleUnit aUnit = eStyleUnit_Null);
+  explicit nsStyleCoord(nsStyleUnit aUnit = eStyleUnit_Null);
   enum CoordConstructorType { CoordConstructor };
   inline nsStyleCoord(nscoord aValue, CoordConstructorType);
   nsStyleCoord(int32_t aValue, nsStyleUnit aUnit);
@@ -152,7 +178,9 @@ public:
   int32_t     GetIntValue() const;
   float       GetPercentValue() const;
   float       GetFactorValue() const;
+  float       GetFactorOrPercentValue() const;
   float       GetAngleValue() const;
+  double      GetAngleValueInDegrees() const;
   double      GetAngleValueInRadians() const;
   float       GetFlexFractionValue() const;
   Calc*       GetCalcValue() const;
@@ -218,6 +246,24 @@ public:
   inline nsStyleCoord GetTop() const;
   inline nsStyleCoord GetRight() const;
   inline nsStyleCoord GetBottom() const;
+
+  // Methods to access the units and values in terms of logical sides
+  // for a given writing mode.
+  // NOTE: The definitions are in WritingModes.h (after we have the full
+  // declaration of WritingMode available).
+  inline nsStyleUnit GetUnit(mozilla::WritingMode aWritingMode,
+                             mozilla::LogicalSide aSide) const;
+  inline nsStyleUnit GetIStartUnit(mozilla::WritingMode aWritingMode) const;
+  inline nsStyleUnit GetBStartUnit(mozilla::WritingMode aWritingMode) const;
+  inline nsStyleUnit GetIEndUnit(mozilla::WritingMode aWritingMode) const;
+  inline nsStyleUnit GetBEndUnit(mozilla::WritingMode aWritingMode) const;
+
+  inline nsStyleCoord Get(mozilla::WritingMode aWritingMode,
+                          mozilla::LogicalSide aSide) const;
+  inline nsStyleCoord GetIStart(mozilla::WritingMode aWritingMode) const;
+  inline nsStyleCoord GetBStart(mozilla::WritingMode aWritingMode) const;
+  inline nsStyleCoord GetIEnd(mozilla::WritingMode aWritingMode) const;
+  inline nsStyleCoord GetBEnd(mozilla::WritingMode aWritingMode) const;
 
   // Sets each side to null and releases any refcounted objects.  Only use this
   // if the object is initialized (i.e. don't use it in nsStyleSides
@@ -328,6 +374,16 @@ inline float nsStyleCoord::GetFactorValue() const
 {
   NS_ASSERTION(mUnit == eStyleUnit_Factor, "not a factor value");
   if (mUnit == eStyleUnit_Factor) {
+    return mValue.mFloat;
+  }
+  return 0.0f;
+}
+
+inline float nsStyleCoord::GetFactorOrPercentValue() const
+{
+  NS_ASSERTION(mUnit == eStyleUnit_Factor || mUnit == eStyleUnit_Percent,
+               "not a percent or factor value");
+  if (mUnit == eStyleUnit_Factor || mUnit == eStyleUnit_Percent) {
     return mValue.mFloat;
   }
   return 0.0f;

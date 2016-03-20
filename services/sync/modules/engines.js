@@ -10,12 +10,11 @@ this.EXPORTED_SYMBOLS = [
   "Store"
 ];
 
-const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
+var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
 
 Cu.import("resource://services-common/async.js");
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-common/observers.js");
-Cu.import("resource://services-common/utils.js");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/identity.js");
 Cu.import("resource://services-sync/record.js");
@@ -54,6 +53,8 @@ this.Tracker = function Tracker(name, engine) {
 
   Svc.Obs.add("weave:engine:start-tracking", this);
   Svc.Obs.add("weave:engine:stop-tracking", this);
+
+  Svc.Prefs.observe("engine." + this.engine.prefName, this);
 };
 
 Tracker.prototype = {
@@ -224,6 +225,11 @@ Tracker.prototype = {
           this._isTracking = false;
         }
         return;
+      case "nsPref:changed":
+        if (data == PREFS_BRANCH + "engine." + this.engine.prefName) {
+          this.onEngineEnabledChanged(this.engine.enabled);
+        }
+        return;
     }
   }
 };
@@ -292,17 +298,21 @@ Store.prototype = {
    */
   applyIncomingBatch: function (records) {
     let failed = [];
-    for each (let record in records) {
+    for (let record of records) {
       try {
         this.applyIncoming(record);
-      } catch (ex if (ex.code == Engine.prototype.eEngineAbortApplyIncoming)) {
-        // This kind of exception should have a 'cause' attribute, which is an
-        // originating exception.
-        // ex.cause will carry its stack with it when rethrown.
-        throw ex.cause;
       } catch (ex) {
-        this._log.warn("Failed to apply incoming record " + record.id);
-        this._log.warn("Encountered exception: " + Utils.exceptionStr(ex));
+        if (ex.code == Engine.prototype.eEngineAbortApplyIncoming) {
+          // This kind of exception should have a 'cause' attribute, which is an
+          // originating exception.
+          // ex.cause will carry its stack with it when rethrown.
+          throw ex.cause;
+        }
+        if (Async.isShutdownException(ex)) {
+          throw ex;
+        }
+        this._log.warn("Failed to apply incoming record " + record.id, ex);
+        this.engine._noteApplyFailure();
         failed.push(record.id);
       }
     };
@@ -476,18 +486,24 @@ EngineManager.prototype = {
   },
 
   getAll: function () {
-    return [engine for ([name, engine] in Iterator(this._engines))];
+    let engines = [];
+    for (let [name, engine] in Iterator(this._engines)) {
+      engines.push(engine);
+    }
+    return engines;
   },
 
   /**
    * N.B., does not pay attention to the declined list.
    */
   getEnabled: function () {
-    return this.getAll().filter(function(engine) engine.enabled);
+    return this.getAll()
+               .filter((engine) => engine.enabled)
+               .sort((a, b) => a.syncPriority - b.syncPriority);
   },
 
   get enabledEngineNames() {
-    return [e.name for each (e in this.getEnabled())];
+    return this.getEnabled().map(e => e.name);
   },
 
   persistDeclined: function () {
@@ -564,16 +580,11 @@ EngineManager.prototype = {
         this._engines[name] = engine;
       }
     } catch (ex) {
-      this._log.error(CommonUtils.exceptionStr(ex));
-
-      let mesg = ex.message ? ex.message : ex;
       let name = engineObject || "";
       name = name.prototype || "";
       name = name.name || "";
 
-      let out = "Could not initialize engine '" + name + "': " + mesg;
-      this._log.error(out);
-
+      this._log.error(`Could not initialize engine ${name}`, ex);
       return engineObject;
     }
   },
@@ -619,27 +630,31 @@ Engine.prototype = {
   // Signal to the engine that processing further records is pointless.
   eEngineAbortApplyIncoming: "error.engine.abort.applyincoming",
 
-  get prefName() this.name,
+  get prefName() {
+    return this.name;
+  },
+
   get enabled() {
     return Svc.Prefs.get("engine." + this.prefName, false);
   },
 
   set enabled(val) {
     Svc.Prefs.set("engine." + this.prefName, !!val);
-    this._tracker.onEngineEnabledChanged(val);
   },
 
-  get score() this._tracker.score,
+  get score() {
+    return this._tracker.score;
+  },
 
   get _store() {
     let store = new this._storeObj(this.Name, this);
-    this.__defineGetter__("_store", function() store);
+    this.__defineGetter__("_store", () => store);
     return store;
   },
 
   get _tracker() {
     let tracker = new this._trackerObj(this.Name, this);
-    this.__defineGetter__("_tracker", function() tracker);
+    this.__defineGetter__("_tracker", () => tracker);
     return tracker;
   },
 
@@ -700,6 +715,16 @@ SyncEngine.prototype = {
   _recordObj: CryptoWrapper,
   version: 1,
 
+  // Which sortindex to use when retrieving records for this engine.
+  _defaultSort: undefined,
+
+  // A relative priority to use when computing an order
+  // for engines to be synced. Higher-priority engines
+  // (lower numbers) are synced first.
+  // It is recommended that a unique value be used for each engine,
+  // in order to guarantee a stable sequence.
+  syncPriority: 0,
+
   // How many records to pull in a single sync. This is primarily to avoid very
   // long first syncs against profiles with many history records.
   downloadLimit: null,
@@ -712,13 +737,21 @@ SyncEngine.prototype = {
   // How many records to process in a single batch.
   applyIncomingBatchSize: DEFAULT_STORE_BATCH_SIZE,
 
-  get storageURL() this.service.storageURL,
+  get storageURL() {
+    return this.service.storageURL;
+  },
 
-  get engineURL() this.storageURL + this.name,
+  get engineURL() {
+    return this.storageURL + this.name;
+  },
 
-  get cryptoKeysURL() this.storageURL + "crypto/keys",
+  get cryptoKeysURL() {
+    return this.storageURL + "crypto/keys";
+  },
 
-  get metaURL() this.storageURL + "meta/global",
+  get metaURL() {
+    return this.storageURL + "meta/global";
+  },
 
   get syncID() {
     // Generate a random syncID if we don't have one
@@ -748,9 +781,15 @@ SyncEngine.prototype = {
     this.lastSyncLocal = 0;
   },
 
-  get toFetch() this._toFetch,
+  get toFetch() {
+    return this._toFetch;
+  },
   set toFetch(val) {
-    let cb = (error) => this._log.error(Utils.exceptionStr(error));
+    let cb = (error) => {
+      if (error) {
+        this._log.error("Failed to read JSON records to fetch", error);
+      }
+    }
     // Coerce the array to a string for more efficient comparison.
     if (val + "" == this._toFetch) {
       return;
@@ -771,9 +810,11 @@ SyncEngine.prototype = {
     });
   },
 
-  get previousFailed() this._previousFailed,
+  get previousFailed() {
+    return this._previousFailed;
+  },
   set previousFailed(val) {
-    let cb = (error) => this._log.error(Utils.exceptionStr(error));
+    let cb = (error) => this._log.error("Failed to set previousFailed", error);
     // Coerce the array to a string for more efficient comparison.
     if (val + "" == this._previousFailed) {
       return;
@@ -920,6 +961,10 @@ SyncEngine.prototype = {
       newitems = this._itemSource();
     }
 
+    if (this._defaultSort) {
+      newitems.sort = this._defaultSort;
+    }
+
     if (isMobile) {
       batchSize = MOBILE_BATCH_SIZE;
     }
@@ -950,10 +995,12 @@ SyncEngine.prototype = {
       try {
         failed = failed.concat(this._store.applyIncomingBatch(applyBatch));
       } catch (ex) {
+        if (Async.isShutdownException(ex)) {
+          throw ex;
+        }
         // Catch any error that escapes from applyIncomingBatch. At present
         // those will all be abort events.
-        this._log.warn("Got exception " + Utils.exceptionStr(ex) +
-                       ", aborting processIncoming.");
+        this._log.warn("Got exception, aborting processIncoming", ex);
         aborting = ex;
       }
       this._tracker.ignoreAll = false;
@@ -998,7 +1045,10 @@ SyncEngine.prototype = {
       try {
         try {
           item.decrypt(key);
-        } catch (ex if Utils.isHMACMismatch(ex)) {
+        } catch (ex) {
+          if (!Utils.isHMACMismatch(ex)) {
+            throw ex;
+          }
           let strategy = self.handleHMACMismatch(item, true);
           if (strategy == SyncEngine.kRecoveryStrategy.retry) {
             // You only get one retry.
@@ -1008,7 +1058,10 @@ SyncEngine.prototype = {
               key = self.service.collectionKeys.keyForCollection(self.name);
               item.decrypt(key);
               strategy = null;
-            } catch (ex if Utils.isHMACMismatch(ex)) {
+            } catch (ex) {
+              if (!Utils.isHMACMismatch(ex)) {
+                throw ex;
+              }
               strategy = self.handleHMACMismatch(item, false);
             }
           }
@@ -1021,7 +1074,8 @@ SyncEngine.prototype = {
               self._log.debug("Ignoring second retry suggestion.");
               // Fall through to error case.
             case SyncEngine.kRecoveryStrategy.error:
-              self._log.warn("Error decrypting record: " + Utils.exceptionStr(ex));
+              self._log.warn("Error decrypting record", ex);
+              self._noteApplyFailure();
               failed.push(item.id);
               return;
             case SyncEngine.kRecoveryStrategy.ignore:
@@ -1031,7 +1085,8 @@ SyncEngine.prototype = {
           }
         }
       } catch (ex) {
-        self._log.warn("Error decrypting record: " + Utils.exceptionStr(ex));
+        self._log.warn("Error decrypting record", ex);
+        self._noteApplyFailure();
         failed.push(item.id);
         return;
       }
@@ -1039,15 +1094,20 @@ SyncEngine.prototype = {
       let shouldApply;
       try {
         shouldApply = self._reconcile(item);
-      } catch (ex if (ex.code == Engine.prototype.eEngineAbortApplyIncoming)) {
-        self._log.warn("Reconciliation failed: aborting incoming processing.");
-        failed.push(item.id);
-        aborting = ex.cause;
       } catch (ex) {
-        self._log.warn("Failed to reconcile incoming record " + item.id);
-        self._log.warn("Encountered exception: " + Utils.exceptionStr(ex));
-        failed.push(item.id);
-        return;
+        if (ex.code == Engine.prototype.eEngineAbortApplyIncoming) {
+          self._log.warn("Reconciliation failed: aborting incoming processing.");
+          self._noteApplyFailure();
+          failed.push(item.id);
+          aborting = ex.cause;
+        } else if (!Async.isShutdownException(ex)) {
+          self._log.warn("Failed to reconcile incoming record " + item.id, ex);
+          self._noteApplyFailure();
+          failed.push(item.id);
+          return;
+        } else {
+          throw ex;
+        }
       }
 
       if (shouldApply) {
@@ -1151,7 +1211,13 @@ SyncEngine.prototype = {
     // Apply remaining items.
     doApplyBatchAndPersistFailed.call(this);
 
-    count.newFailed = Utils.arraySub(this.previousFailed, failedInPreviousSync).length;
+    count.newFailed = this.previousFailed.reduce((count, engine) => {
+      if (failedInPreviousSync.indexOf(engine) == -1) {
+        count++;
+        this._noteApplyNewFailure();
+      }
+      return count;
+    }, 0);
     count.succeeded = Math.max(0, count.applied - count.failed);
     this._log.info(["Records:",
                     count.applied, "applied,",
@@ -1160,6 +1226,16 @@ SyncEngine.prototype = {
                     count.newFailed, "newly failed to apply,",
                     count.reconciled, "reconciled."].join(" "));
     Observers.notify("weave:engine:sync:applied", count, this.name);
+  },
+
+  _noteApplyFailure: function () {
+    Services.telemetry.getKeyedHistogramById(
+      "WEAVE_ENGINE_APPLY_FAILURES").add(this.name);
+  },
+
+  _noteApplyNewFailure: function () {
+    Services.telemetry.getKeyedHistogramById(
+      "WEAVE_ENGINE_APPLY_NEW_FAILURES").add(this.name);
   },
 
   /**
@@ -1375,13 +1451,7 @@ SyncEngine.prototype = {
 
       // collection we'll upload
       let up = new Collection(this.engineURL, null, this.service);
-      let count = 0;
-
-      // Upload what we've got so far in the collection
-      let doUpload = Utils.bind2(this, function(desc) {
-        this._log.info("Uploading " + desc + " of " + modifiedIDs.length +
-                       " records");
-        let resp = up.post();
+      let handleResponse = resp => {
         if (!resp.success) {
           this._log.debug("Uploading records failed: " + resp);
           resp.failureCode = ENGINE_UPLOAD_FAIL;
@@ -1400,36 +1470,36 @@ SyncEngine.prototype = {
                           + failed_ids.join(", "));
 
         // Clear successfully uploaded objects.
-        for each (let id in resp.obj.success) {
+        for (let key in resp.obj.success) {
+          let id = resp.obj.success[key];
           delete this._modified[id];
         }
+      }
 
-        up.clearRecords();
-      });
+      let postQueue = up.newPostQueue(this._log, handleResponse);
 
-      for each (let id in modifiedIDs) {
+      for (let id of modifiedIDs) {
+        let out;
+        let ok = false;
         try {
-          let out = this._createRecord(id);
+          out = this._createRecord(id);
           if (this._log.level <= Log.Level.Trace)
             this._log.trace("Outgoing: " + out);
 
           out.encrypt(this.service.collectionKeys.keyForCollection(this.name));
-          up.pushData(out);
+          ok = true;
+        } catch (ex) {
+          if (Async.isShutdownException(ex)) {
+            throw ex;
+          }
+          this._log.warn("Error creating record", ex);
         }
-        catch(ex) {
-          this._log.warn("Error creating record: " + Utils.exceptionStr(ex));
+        if (ok) {
+          postQueue.enqueue(out);
         }
-
-        // Partial upload
-        if ((++count % MAX_UPLOAD_RECORDS) == 0)
-          doUpload((count - MAX_UPLOAD_RECORDS) + " - " + count + " out");
-
         this._store._sleep(0);
       }
-
-      // Final upload
-      if (count % MAX_UPLOAD_RECORDS > 0)
-        doUpload(count >= MAX_UPLOAD_RECORDS ? "last batch" : "all");
+      postQueue.flush();
     }
   },
 
@@ -1507,9 +1577,11 @@ SyncEngine.prototype = {
     try {
       this._log.trace("Trying to decrypt a record from the server..");
       test.get();
-    }
-    catch(ex) {
-      this._log.debug("Failed test decrypt: " + Utils.exceptionStr(ex));
+    } catch (ex) {
+      if (Async.isShutdownException(ex)) {
+        throw ex;
+      }
+      this._log.debug("Failed test decrypt", ex);
     }
 
     return canDecrypt;

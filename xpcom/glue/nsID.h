@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -35,6 +36,11 @@ struct nsID
 
   //@{
   /**
+   * Ensures everything is zeroed out.
+   */
+  void Clear();
+
+  /**
    * Equivalency method. Compares this nsID with another.
    * @return <b>true</b> if they are the same, <b>false</b> if not.
    */
@@ -49,11 +55,16 @@ struct nsID
       (((uint32_t*)&m0)[3] == ((uint32_t*)&aOther.m0)[3]);
   }
 
+  inline bool operator==(const nsID& aOther) const
+  {
+    return Equals(aOther);
+  }
+
   /**
    * nsID Parsing method. Turns a {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}
    * string into an nsID
    */
-  NS_COM_GLUE bool Parse(const char* aIDStr);
+  bool Parse(const char* aIDStr);
 
 #ifndef XPCOM_GLUE_AVOID_NSPR
   /**
@@ -61,14 +72,14 @@ struct nsID
    * {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx} format. Caller should free string.
    * YOU SHOULD ONLY USE THIS IF YOU CANNOT USE ToProvidedString() BELOW.
    */
-  NS_COM_GLUE char* ToString() const;
+  char* ToString() const;
 
   /**
    * nsID string encoder. Builds a string in
    * {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx} format, into a char[NSID_LENGTH]
    * buffer provided by the caller (for instance, on the stack).
    */
-  NS_COM_GLUE void ToProvidedString(char (&aDest)[NSID_LENGTH]) const;
+  void ToProvidedString(char (&aDest)[NSID_LENGTH]) const;
 
 #endif // XPCOM_GLUE_AVOID_NSPR
 
@@ -86,7 +97,7 @@ typedef nsID nsCID;
   const nsCID _name = _cidspec
 
 #define NS_DEFINE_NAMED_CID(_name) \
-  static nsCID k##_name = _name
+  static const nsCID k##_name = _name
 
 #define REFNSCID const nsCID&
 

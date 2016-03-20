@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 12; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,7 +21,7 @@ namespace mozilla {
  * on this thread, or else you will deadlock.
  *
  * Typical usage:
- * nsRefPtr<SyncRunnable> sr = new SyncRunnable(new myrunnable...());
+ * RefPtr<SyncRunnable> sr = new SyncRunnable(new myrunnable...());
  * sr->DispatchToThread(t);
  *
  * We also provide a convenience wrapper:
@@ -30,7 +31,7 @@ namespace mozilla {
 class SyncRunnable : public nsRunnable
 {
 public:
-  SyncRunnable(nsIRunnable* aRunnable)
+  explicit SyncRunnable(nsIRunnable* aRunnable)
     : mRunnable(aRunnable)
     , mMonitor("SyncRunnable")
     , mDone(false)
@@ -64,7 +65,7 @@ public:
                                nsIRunnable* aRunnable,
                                bool aForceDispatch = false)
   {
-    nsRefPtr<SyncRunnable> s(new SyncRunnable(aRunnable));
+    RefPtr<SyncRunnable> s(new SyncRunnable(aRunnable));
     s->DispatchToThread(aThread, aForceDispatch);
   }
 

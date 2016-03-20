@@ -11,9 +11,6 @@
     <item android:id="@+id/home_open_private_tab"
           android:title="@string/contextmenu_open_private_tab"/>
 
-    <item android:id="@+id/home_open_in_reader"
-          android:title="@string/contextmenu_open_in_reader"/>
-
     <item android:id="@+id/home_copyurl"
           android:title="@string/contextmenu_copyurl"/>
 
@@ -31,6 +28,12 @@
 
     <item android:id="@+id/home_edit_bookmark"
           android:title="@string/contextmenu_edit_bookmark"/>
+
+    <item android:id="@+id/mark_read"
+          android:title="@string/contextmenu_mark_read" />
+
+    <item android:id="@+id/mark_unread"
+        android:title="@string/contextmenu_mark_unread" />
 
     <item android:id="@+id/home_remove"
           android:title="@string/contextmenu_remove"/>

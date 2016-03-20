@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -77,13 +78,24 @@ struct CycleCollectionNoteChildImpl<T, false>
   }
 };
 
+// We declare CycleCollectionNoteChild in 3-argument and 4-argument variants,
+// rather than using default arguments, so that forward declarations work
+// regardless of header inclusion order.
 template<typename T>
 inline void
 CycleCollectionNoteChild(nsCycleCollectionTraversalCallback& aCallback,
-                         T* aChild, const char* aName, uint32_t aFlags = 0)
+                         T* aChild, const char* aName, uint32_t aFlags)
 {
   CycleCollectionNoteEdgeName(aCallback, aName, aFlags);
   CycleCollectionNoteChildImpl<T>::Run(aCallback, aChild);
+}
+
+template<typename T>
+inline void
+CycleCollectionNoteChild(nsCycleCollectionTraversalCallback& aCallback,
+                         T* aChild, const char* aName)
+{
+  CycleCollectionNoteChild(aCallback, aChild, aName, 0);
 }
 
 #endif // nsCycleCollectionNoteChild_h__

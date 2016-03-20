@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,9 +16,11 @@ SimpleGestureEvent::SimpleGestureEvent(EventTarget* aOwner,
                                        WidgetSimpleGestureEvent* aEvent)
   : MouseEvent(aOwner, aPresContext,
                aEvent ? aEvent :
-                        new WidgetSimpleGestureEvent(false, 0, nullptr))
+                        new WidgetSimpleGestureEvent(false, eVoidEvent,
+                                                     nullptr))
 {
-  NS_ASSERTION(mEvent->eventStructType == NS_SIMPLE_GESTURE_EVENT, "event type mismatch");
+  NS_ASSERTION(mEvent->mClass == eSimpleGestureEventClass,
+               "event type mismatch");
 
   if (aEvent) {
     mEventIsInternal = false;
@@ -37,7 +40,6 @@ NS_INTERFACE_MAP_BEGIN(SimpleGestureEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMSimpleGestureEvent)
 NS_INTERFACE_MAP_END_INHERITING(MouseEvent)
 
-/* attribute unsigned long allowedDirections; */
 uint32_t
 SimpleGestureEvent::AllowedDirections()
 {
@@ -59,7 +61,6 @@ SimpleGestureEvent::SetAllowedDirections(uint32_t aAllowedDirections)
   return NS_OK;
 }
 
-/* readonly attribute unsigned long direction; */
 uint32_t
 SimpleGestureEvent::Direction()
 {
@@ -74,7 +75,6 @@ SimpleGestureEvent::GetDirection(uint32_t* aDirection)
   return NS_OK;
 }
 
-/* readonly attribute float delta; */
 double
 SimpleGestureEvent::Delta()
 {
@@ -89,7 +89,6 @@ SimpleGestureEvent::GetDelta(double* aDelta)
   return NS_OK;
 }
 
-/* readonly attribute unsigned long clickCount; */
 uint32_t
 SimpleGestureEvent::ClickCount()
 {
@@ -104,11 +103,11 @@ SimpleGestureEvent::GetClickCount(uint32_t* aClickCount)
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 SimpleGestureEvent::InitSimpleGestureEvent(const nsAString& aTypeArg,
                                            bool aCanBubbleArg,
                                            bool aCancelableArg,
-                                           nsIDOMWindow* aViewArg,
+                                           nsGlobalWindow* aViewArg,
                                            int32_t aDetailArg,
                                            int32_t aScreenX, 
                                            int32_t aScreenY,
@@ -119,27 +118,23 @@ SimpleGestureEvent::InitSimpleGestureEvent(const nsAString& aTypeArg,
                                            bool aShiftKeyArg,
                                            bool aMetaKeyArg,
                                            uint16_t aButton,
-                                           nsIDOMEventTarget* aRelatedTarget,
+                                           EventTarget* aRelatedTarget,
                                            uint32_t aAllowedDirectionsArg,
                                            uint32_t aDirectionArg,
                                            double aDeltaArg,
                                            uint32_t aClickCountArg)
 {
-  nsresult rv =
-    MouseEvent::InitMouseEvent(aTypeArg, aCanBubbleArg, aCancelableArg,
-                               aViewArg, aDetailArg,
-                               aScreenX, aScreenY, aClientX, aClientY,
-                               aCtrlKeyArg, aAltKeyArg, aShiftKeyArg,
-                               aMetaKeyArg, aButton, aRelatedTarget);
-  NS_ENSURE_SUCCESS(rv, rv);
+  MouseEvent::InitMouseEvent(aTypeArg, aCanBubbleArg, aCancelableArg,
+                             aViewArg, aDetailArg,
+                             aScreenX, aScreenY, aClientX, aClientY,
+                             aCtrlKeyArg, aAltKeyArg, aShiftKeyArg,
+                             aMetaKeyArg, aButton, aRelatedTarget);
 
   WidgetSimpleGestureEvent* simpleGestureEvent = mEvent->AsSimpleGestureEvent();
   simpleGestureEvent->allowedDirections = aAllowedDirectionsArg;
   simpleGestureEvent->direction = aDirectionArg;
   simpleGestureEvent->delta = aDeltaArg;
   simpleGestureEvent->clickCount = aClickCountArg;
-
-  return NS_OK;
 }
 
 } // namespace dom
@@ -148,14 +143,12 @@ SimpleGestureEvent::InitSimpleGestureEvent(const nsAString& aTypeArg,
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsresult
-NS_NewDOMSimpleGestureEvent(nsIDOMEvent** aInstancePtrResult,
-                            EventTarget* aOwner,
+already_AddRefed<SimpleGestureEvent>
+NS_NewDOMSimpleGestureEvent(EventTarget* aOwner,
                             nsPresContext* aPresContext,
                             WidgetSimpleGestureEvent* aEvent)
 {
-  SimpleGestureEvent* it = new SimpleGestureEvent(aOwner, aPresContext, aEvent);
-  NS_ADDREF(it);
-  *aInstancePtrResult = static_cast<Event*>(it);
-  return NS_OK;
+  RefPtr<SimpleGestureEvent> it =
+    new SimpleGestureEvent(aOwner, aPresContext, aEvent);
+  return it.forget();
 }

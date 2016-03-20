@@ -47,6 +47,10 @@ XULButtonAccessible::
   }
 }
 
+XULButtonAccessible::~XULButtonAccessible()
+{
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // XULButtonAccessible: nsISupports
 
@@ -61,24 +65,21 @@ XULButtonAccessible::ActionCount()
   return 1;
 }
 
-NS_IMETHODIMP
-XULButtonAccessible::GetActionName(uint8_t aIndex, nsAString& aName)
+void
+XULButtonAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 {
-  if (aIndex == eAction_Click) {
-    aName.AssignLiteral("press"); 
-    return NS_OK;
-  }
-  return NS_ERROR_INVALID_ARG;
+  if (aIndex == eAction_Click)
+    aName.AssignLiteral("press");
 }
 
-NS_IMETHODIMP
+bool
 XULButtonAccessible::DoAction(uint8_t aIndex)
 {
   if (aIndex != 0)
-    return NS_ERROR_INVALID_ARG;
+    return false;
 
   DoCommand();
-  return NS_OK;
+  return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -164,7 +165,7 @@ XULButtonAccessible::ContainerWidget() const
 }
 
 bool
-XULButtonAccessible::IsAcceptableChild(Accessible* aPossibleChild) const
+XULButtonAccessible::IsAcceptableChild(nsIContent* aEl) const
 {
   // In general XUL button has not accessible children. Nevertheless menu
   // buttons can have button (@type="menu-button") and popup accessibles
@@ -172,17 +173,21 @@ XULButtonAccessible::IsAcceptableChild(Accessible* aPossibleChild) const
 
   // XXX: no children until the button is menu button. Probably it's not
   // totally correct but in general AT wants to have leaf buttons.
-  roles::Role role = aPossibleChild->Role();
+  nsAutoString role;
+  nsCoreUtils::XBLBindingRole(aEl, role);
 
   // Get an accessible for menupopup or panel elements.
-  if (role == roles::MENUPOPUP)
+  if (role.EqualsLiteral("xul:menupopup")) {
     return true;
+  }
 
   // Button type="menu-button" contains a real button. Get an accessible
   // for it. Ignore dropmarker button which is placed as a last child.
-  if (role != roles::PUSHBUTTON ||
-      aPossibleChild->GetContent()->Tag() == nsGkAtoms::dropMarker)
+  if ((!role.EqualsLiteral("xul:button") &&
+       !role.EqualsLiteral("xul:toolbarbutton")) ||
+      aEl->IsXULElement(nsGkAtoms::dropMarker)) {
     return false;
+  }
 
   return mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
                                nsGkAtoms::menuButton, eCaseMatters);
@@ -192,7 +197,7 @@ XULButtonAccessible::IsAcceptableChild(Accessible* aPossibleChild) const
 // XULButtonAccessible protected
 
 bool
-XULButtonAccessible::ContainsMenu()
+XULButtonAccessible::ContainsMenu() const
 {
   static nsIContent::AttrValuesArray strings[] =
     {&nsGkAtoms::menu, &nsGkAtoms::menuButton, nullptr};
@@ -219,59 +224,56 @@ XULDropmarkerAccessible::ActionCount()
 }
 
 bool
-XULDropmarkerAccessible::DropmarkerOpen(bool aToggleOpen)
+XULDropmarkerAccessible::DropmarkerOpen(bool aToggleOpen) const
 {
   bool isOpen = false;
 
-  nsCOMPtr<nsIDOMXULButtonElement> parentButtonElement =
-    do_QueryInterface(mContent->GetFlattenedTreeParent());
+  nsIContent* parent = mContent->GetFlattenedTreeParent();
 
-  if (parentButtonElement) {
-    parentButtonElement->GetOpen(&isOpen);
-    if (aToggleOpen)
-      parentButtonElement->SetOpen(!isOpen);
-  }
-  else {
+  while (parent) {
+    nsCOMPtr<nsIDOMXULButtonElement> parentButtonElement =
+      do_QueryInterface(parent);
+    if (parentButtonElement) {
+      parentButtonElement->GetOpen(&isOpen);
+      if (aToggleOpen)
+        parentButtonElement->SetOpen(!isOpen);
+      return isOpen;
+    }
+
     nsCOMPtr<nsIDOMXULMenuListElement> parentMenuListElement =
-      do_QueryInterface(parentButtonElement);
+      do_QueryInterface(parent);
     if (parentMenuListElement) {
       parentMenuListElement->GetOpen(&isOpen);
       if (aToggleOpen)
         parentMenuListElement->SetOpen(!isOpen);
+      return isOpen;
     }
+    parent = parent->GetFlattenedTreeParent();
   }
 
   return isOpen;
 }
 
-/**
-  * Return the name of our only action
-  */
-NS_IMETHODIMP
-XULDropmarkerAccessible::GetActionName(uint8_t aIndex, nsAString& aName)
+void
+XULDropmarkerAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 {
+  aName.Truncate();
   if (aIndex == eAction_Click) {
     if (DropmarkerOpen(false))
       aName.AssignLiteral("close");
     else
       aName.AssignLiteral("open");
-    return NS_OK;
   }
-
-  return NS_ERROR_INVALID_ARG;
 }
 
-/**
-  * Tell the Dropmarker to do its action
-  */
-NS_IMETHODIMP
+bool
 XULDropmarkerAccessible::DoAction(uint8_t index)
 {
   if (index == eAction_Click) {
     DropmarkerOpen(true); // Reverse the open attribute
-    return NS_OK;
+    return true;
   }
-  return NS_ERROR_INVALID_ARG;
+  return false;
 }
 
 role
@@ -308,36 +310,25 @@ XULCheckboxAccessible::ActionCount()
   return 1;
 }
 
-/**
-  * Return the name of our only action
-  */
-NS_IMETHODIMP
-XULCheckboxAccessible::GetActionName(uint8_t aIndex, nsAString& aName)
+void
+XULCheckboxAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 {
   if (aIndex == eAction_Click) {
-    // check or uncheck
-
     if (NativeState() & states::CHECKED)
       aName.AssignLiteral("uncheck");
     else
       aName.AssignLiteral("check");
-
-    return NS_OK;
   }
-  return NS_ERROR_INVALID_ARG;
 }
 
-/**
-  * Tell the checkbox to do its only action -- check( or uncheck) itself
-  */
-NS_IMETHODIMP
+bool
 XULCheckboxAccessible::DoAction(uint8_t aIndex)
 {
   if (aIndex != eAction_Click)
-    return NS_ERROR_INVALID_ARG;
+    return false;
 
   DoCommand();
-  return NS_OK;
+  return true;
 }
 
 uint64_t
@@ -490,7 +481,7 @@ XULRadioGroupAccessible::
 role
 XULRadioGroupAccessible::NativeRole()
 {
-  return roles::GROUPING;
+  return roles::RADIO_GROUP;
 }
 
 uint64_t
@@ -587,9 +578,10 @@ bool
 XULToolbarButtonAccessible::IsSeparator(Accessible* aAccessible)
 {
   nsIContent* content = aAccessible->GetContent();
-  return content && ((content->Tag() == nsGkAtoms::toolbarseparator) ||
-                     (content->Tag() == nsGkAtoms::toolbarspacer) ||
-                     (content->Tag() == nsGkAtoms::toolbarspring)); }
+  return content && content->IsAnyOfXULElements(nsGkAtoms::toolbarseparator,
+                                                nsGkAtoms::toolbarspacer,
+                                                nsGkAtoms::toolbarspring);
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////

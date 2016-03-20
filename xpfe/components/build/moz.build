@@ -8,10 +8,11 @@ SOURCES += [
     'nsModule.cpp',
 ]
 
-LIBRARY_NAME = 'appcomps'
-
 FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
     '../directory',
 ]
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wshadow']

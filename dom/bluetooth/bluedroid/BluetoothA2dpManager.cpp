@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,13 +7,6 @@
 #include "base/basictypes.h"
 
 #include "BluetoothA2dpManager.h"
-
-#include <hardware/bluetooth.h>
-#include <hardware/bt_av.h>
-#if ANDROID_VERSION > 17
-#include <hardware/bt_rc.h>
-#endif
-
 #include "BluetoothCommon.h"
 #include "BluetoothService.h"
 #include "BluetoothSocket.h"
@@ -33,180 +26,16 @@ USING_BLUETOOTH_NAMESPACE
 #define AVRC_ID_FAST_FOR 0x49
 #define AVRC_KEY_PRESS_STATE  1
 #define AVRC_KEY_RELEASE_STATE  0
+// bluedroid bt_rc.h
+#define AVRC_MAX_ATTR_STR_LEN 255
 
 namespace {
   StaticRefPtr<BluetoothA2dpManager> sBluetoothA2dpManager;
   bool sInShutdown = false;
-  static const btav_interface_t* sBtA2dpInterface;
-#if ANDROID_VERSION > 17
-  static const btrc_interface_t* sBtAvrcpInterface;
-#endif
-} // anonymous namespace
+  static BluetoothA2dpInterface* sBtA2dpInterface;
+} // namespace
 
-class SinkPropertyChangedHandler : public nsRunnable
-{
-public:
-  SinkPropertyChangedHandler(const BluetoothSignal& aSignal)
-    : mSignal(aSignal)
-  {
-  }
-
-  NS_IMETHOD
-  Run()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    BluetoothA2dpManager* a2dp = BluetoothA2dpManager::Get();
-    NS_ENSURE_TRUE(a2dp, NS_ERROR_FAILURE);
-    a2dp->HandleSinkPropertyChanged(mSignal);
-
-    return NS_OK;
-  }
-
-private:
-  BluetoothSignal mSignal;
-};
-
-class RequestPlayStatusTask : public nsRunnable
-{
-public:
-  RequestPlayStatusTask()
-  {
-    MOZ_ASSERT(!NS_IsMainThread());
-  }
-
-  nsresult Run()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    BluetoothSignal signal(NS_LITERAL_STRING(REQUEST_MEDIA_PLAYSTATUS_ID),
-                           NS_LITERAL_STRING(KEY_ADAPTER),
-                           InfallibleTArray<BluetoothNamedValue>());
-
-    BluetoothService* bs = BluetoothService::Get();
-    NS_ENSURE_TRUE(bs, NS_ERROR_FAILURE);
-    bs->DistributeSignal(signal);
-
-    return NS_OK;
-  }
-};
-
-#if ANDROID_VERSION > 17
-class UpdateRegisterNotificationTask : public nsRunnable
-{
-public:
-  UpdateRegisterNotificationTask(btrc_event_id_t aEventId, uint32_t aParam)
-    : mEventId(aEventId)
-    , mParam(aParam)
-  {
-    MOZ_ASSERT(!NS_IsMainThread());
-  }
-
-  nsresult Run()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    BluetoothA2dpManager* a2dp = BluetoothA2dpManager::Get();
-    NS_ENSURE_TRUE(a2dp, NS_OK);
-    a2dp->UpdateRegisterNotification(mEventId, mParam);
-    return NS_OK;
-  }
-private:
-  btrc_event_id_t mEventId;
-  uint32_t mParam;
-};
-
-/*
- * This function maps attribute id and returns corresponding values
- * Attribute id refers to btrc_media_attr_t in bt_rc.h
- */
-static void
-ConvertAttributeString(int aAttrId, nsAString& aAttrStr)
-{
-  BluetoothA2dpManager* a2dp = BluetoothA2dpManager::Get();
-  NS_ENSURE_TRUE_VOID(a2dp);
-
-  switch (aAttrId) {
-    case BTRC_MEDIA_ATTR_TITLE:
-      a2dp->GetTitle(aAttrStr);
-      break;
-    case BTRC_MEDIA_ATTR_ARTIST:
-      a2dp->GetArtist(aAttrStr);
-      break;
-    case BTRC_MEDIA_ATTR_ALBUM:
-      a2dp->GetAlbum(aAttrStr);
-      break;
-    case BTRC_MEDIA_ATTR_TRACK_NUM:
-      aAttrStr.AppendInt(a2dp->GetMediaNumber());
-      break;
-    case BTRC_MEDIA_ATTR_NUM_TRACKS:
-      aAttrStr.AppendInt(a2dp->GetTotalMediaNumber());
-      break;
-    case BTRC_MEDIA_ATTR_GENRE:
-      // TODO: we currently don't support genre from music player
-      aAttrStr.Truncate();
-      break;
-    case BTRC_MEDIA_ATTR_PLAYING_TIME:
-      aAttrStr.AppendInt(a2dp->GetDuration());
-      break;
-  }
-}
-
-class UpdateElementAttrsTask : public nsRunnable
-{
-public:
-  UpdateElementAttrsTask(uint8_t aNumAttr, btrc_media_attr_t* aPlayerAttrs)
-    : mNumAttr(aNumAttr)
-    , mPlayerAttrs(aPlayerAttrs)
-  {
-    MOZ_ASSERT(!NS_IsMainThread());
-  }
-
-  nsresult Run()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    btrc_element_attr_val_t* attrs = new btrc_element_attr_val_t[mNumAttr];
-    for (int i = 0; i < mNumAttr; i++) {
-      nsAutoString attrText;
-      attrs[i].attr_id = mPlayerAttrs[i];
-      ConvertAttributeString(mPlayerAttrs[i], attrText);
-      strcpy((char *)attrs[i].text, NS_ConvertUTF16toUTF8(attrText).get());
-    }
-
-    NS_ENSURE_TRUE(sBtAvrcpInterface, NS_OK);
-    sBtAvrcpInterface->get_element_attr_rsp(mNumAttr, attrs);
-
-    return NS_OK;
-  }
-private:
-  uint8_t mNumAttr;
-  btrc_media_attr_t* mPlayerAttrs;
-};
-
-class UpdatePassthroughCmdTask : public nsRunnable
-{
-public:
-  UpdatePassthroughCmdTask(const nsAString& aName)
-    : mName(aName)
-  {
-    MOZ_ASSERT(!NS_IsMainThread());
-  }
-
-  nsresult Run()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    NS_NAMED_LITERAL_STRING(type, "media-button");
-    BroadcastSystemMessage(type, BluetoothValue(mName));
-
-    return NS_OK;
-  }
-private:
-  nsString mName;
-};
-
-#endif
+const int BluetoothA2dpManager::MAX_NUM_CLIENTS = 1;
 
 NS_IMETHODIMP
 BluetoothA2dpManager::Observe(nsISupports* aSubject,
@@ -232,271 +61,101 @@ BluetoothA2dpManager::BluetoothA2dpManager()
 void
 BluetoothA2dpManager::Reset()
 {
-  ResetA2dp();
-  ResetAvrcp();
+  mA2dpConnected = false;
+  mSinkState = SinkState::SINK_DISCONNECTED;
+  mController = nullptr;
 }
 
 static void
-AvStatusToSinkString(btav_connection_state_t aStatus, nsAString& aState)
+AvStatusToSinkString(BluetoothA2dpConnectionState aState, nsAString& aString)
 {
-  nsAutoString state;
-  if (aStatus == BTAV_CONNECTION_STATE_DISCONNECTED) {
-    aState = NS_LITERAL_STRING("disconnected");
-  } else if (aStatus == BTAV_CONNECTION_STATE_CONNECTING) {
-    aState = NS_LITERAL_STRING("connecting");
-  } else if (aStatus == BTAV_CONNECTION_STATE_CONNECTED) {
-    aState = NS_LITERAL_STRING("connected");
-  } else if (aStatus == BTAV_CONNECTION_STATE_DISCONNECTING) {
-    aState = NS_LITERAL_STRING("disconnecting");
-  } else {
-    BT_WARNING("Unknown sink state");
-  }
-}
-
-static void
-A2dpConnectionStateCallback(btav_connection_state_t aState,
-                            bt_bdaddr_t* aBdAddress)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-  nsString remoteDeviceBdAddress;
-  BdAddressTypeToString(aBdAddress, remoteDeviceBdAddress);
-
-  nsString a2dpState;
-  AvStatusToSinkString(aState, a2dpState);
-
-  InfallibleTArray<BluetoothNamedValue> props;
-  BT_APPEND_NAMED_VALUE(props, "State", a2dpState);
-
-  BluetoothSignal signal(NS_LITERAL_STRING("AudioSink"),
-                         remoteDeviceBdAddress, props);
-  NS_DispatchToMainThread(new SinkPropertyChangedHandler(signal));
-}
-
-static void
-A2dpAudioStateCallback(btav_audio_state_t aState,
-                       bt_bdaddr_t* aBdAddress)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-  nsString remoteDeviceBdAddress;
-  BdAddressTypeToString(aBdAddress, remoteDeviceBdAddress);
-
-  nsString a2dpState;
-
-  if (aState == BTAV_AUDIO_STATE_STARTED) {
-    a2dpState = NS_LITERAL_STRING("playing");
-  } else if (aState == BTAV_AUDIO_STATE_STOPPED) {
-    // for avdtp state stop stream
-    a2dpState = NS_LITERAL_STRING("connected");
-  } else if (aState == BTAV_AUDIO_STATE_REMOTE_SUSPEND) {
-    // for avdtp state suspend stream from remote side
-    a2dpState = NS_LITERAL_STRING("connected");
-  }
-
-  InfallibleTArray<BluetoothNamedValue> props;
-  BT_APPEND_NAMED_VALUE(props, "State", a2dpState);
-
-  BluetoothSignal signal(NS_LITERAL_STRING("AudioSink"),
-                         remoteDeviceBdAddress, props);
-  NS_DispatchToMainThread(new SinkPropertyChangedHandler(signal));
-}
-
-#if ANDROID_VERSION > 17
-/*
- * Avrcp 1.3 callbacks
- */
-
-/*
- * This function is to request Gaia player application to update
- * current play status.
- * Callback for play status request
- */
-static void
-AvrcpGetPlayStatusCallback()
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-  NS_DispatchToMainThread(new RequestPlayStatusTask());
-}
-
-/*
- * This function is trying to get element attributes, which request from CT
- * Unlike BlueZ only calls UpdateMetaData, bluedroid does not cache meta data
- * information, but instead uses callback AvrcpGetElementAttrCallback and
- * call get_element_attr_rsp() to reply request.
- *
- * Callback to fetch the get element attributes of the current song
- * aNumAttr: It represents the number of attributes requested in aPlayerAttrs
- * aPlayerAttrs: It represents Attribute Ids
- */
-static void
-AvrcpGetElementAttrCallback(uint8_t aNumAttr, btrc_media_attr_t* aPlayerAttrs)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-  NS_DispatchToMainThread(new UpdateElementAttrsTask(aNumAttr, aPlayerAttrs));
-}
-
-/*
- * Callback for register notification (Play state change/track change/...)
- * To reply RegisterNotification INTERIM response
- * See AVRCP 1.3 Spec 25.2
- * aParam: It only valids if event_id is BTRC_EVT_PLAY_POS_CHANGED,
- * which is playback interval time
- */
-static void
-AvrcpRegisterNotificationCallback(btrc_event_id_t aEventId, uint32_t aParam)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-  NS_DispatchToMainThread(new UpdateRegisterNotificationTask(aEventId, aParam));
-}
-
-/*
- * Player application settings is optional for Avrcp 1.3
- * B2G 1.3 currently does not support Player application setting
- * related functions. Support Player Setting in the future version
- */
-static void
-AvrcpListPlayerAppAttributeCallback()
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-// TODO: Support avrcp application setting related functions
-}
-
-static void
-AvrcpListPlayerAppValuesCallback(btrc_player_attr_t aAttrId)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-// TODO: Support avrcp application setting related functions
-}
-
-static void
-AvrcpGetPlayerAppValueCallback(uint8_t aNumAttr,
-                               btrc_player_attr_t* aPlayerAttrs)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-// TODO: Support avrcp application setting related functions
-}
-
-static void
-AvrcpGetPlayerAppAttrsTextCallback(uint8_t aNumAttr,
-                                   btrc_player_attr_t* PlayerAttrs)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-// TODO: Support avrcp application setting related functions
-}
-
-static void
-AvrcpGetPlayerAppValuesTextCallback(uint8_t aAttrId, uint8_t aNumVal,
-                                    uint8_t* PlayerVals)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-// TODO: Support avrcp application setting related functions
-}
-
-static void
-AvrcpSetPlayerAppValueCallback(btrc_player_settings_t* aPlayerVals)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-// TODO: Support avrcp application setting related functions
-}
-#endif
-
-#if ANDROID_VERSION > 18
-/*
- * This callback function is to get CT features from Feature Bit Mask.
- * If Advanced Control Player bit is set, CT supports
- * volume sync (absolute volume feature). If Browsing bit is set, Avrcp 1.4
- * Browse feature will be supported
- */
-static void
-AvrcpRemoteFeaturesCallback(bt_bdaddr_t* aBdAddress,
-                            btrc_remote_features_t aFeatures)
-{
-// TODO: Support avrcp 1.4 absolute volume/browse
-}
-
-/*
- * This callback function is to get notification that volume changed on the
- * remote car kit (if it supports Avrcp 1.4), not notification from phone.
- */
-static void
-AvrcpRemoteVolumeChangedCallback(uint8_t aVolume, uint8_t aCType)
-{
-// TODO: Support avrcp 1.4 absolute volume/browse
-}
-
-/*
- * This callback function is to handle passthrough commands.
- */
-static void
-AvrcpPassThroughCallback(int aId, int aKeyState)
-{
-  // Fast-forward and rewind key events won't be generated from bluedroid
-  // stack after ANDROID_VERSION > 18, but via passthrough callback.
-  nsAutoString name;
-  NS_ENSURE_TRUE_VOID(aKeyState == AVRC_KEY_PRESS_STATE ||
-                      aKeyState == AVRC_KEY_RELEASE_STATE);
-  switch (aId) {
-    case AVRC_ID_FAST_FOR:
-      if (aKeyState == AVRC_KEY_PRESS_STATE) {
-        name.AssignLiteral("media-fast-forward-button-press");
-      } else {
-        name.AssignLiteral("media-fast-forward-button-release");
-      }
+  switch (aState) {
+    case A2DP_CONNECTION_STATE_DISCONNECTED:
+      aString.AssignLiteral("disconnected");
       break;
-    case AVRC_ID_REWIND:
-      if (aKeyState == AVRC_KEY_PRESS_STATE) {
-        name.AssignLiteral("media-rewind-button-press");
-      } else {
-        name.AssignLiteral("media-rewind-button-release");
-      }
+    case A2DP_CONNECTION_STATE_CONNECTING:
+      aString.AssignLiteral("connecting");
+      break;
+    case A2DP_CONNECTION_STATE_CONNECTED:
+      aString.AssignLiteral("connected");
+      break;
+    case A2DP_CONNECTION_STATE_DISCONNECTING:
+      aString.AssignLiteral("disconnecting");
       break;
     default:
-      BT_WARNING("Unable to handle the unknown PassThrough command %d", aId);
-      break;
-  }
-  if (!name.IsEmpty()) {
-    NS_DispatchToMainThread(new UpdatePassthroughCmdTask(name));
+      BT_WARNING("Unknown sink state %d", static_cast<int>(aState));
+      return;
   }
 }
-#endif
 
-static btav_callbacks_t sBtA2dpCallbacks = {
-  sizeof(sBtA2dpCallbacks),
-  A2dpConnectionStateCallback,
-  A2dpAudioStateCallback
+class BluetoothA2dpManager::RegisterModuleResultHandler final
+  : public BluetoothSetupResultHandler
+{
+public:
+  RegisterModuleResultHandler(BluetoothA2dpInterface* aInterface,
+                              BluetoothProfileResultHandler* aRes)
+    : mInterface(aInterface)
+    , mRes(aRes)
+  { }
+
+  void OnError(BluetoothStatus aStatus) override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    BT_WARNING("BluetoothSetupInterface::RegisterModule failed for A2DP: %d",
+               (int)aStatus);
+
+    mInterface->SetNotificationHandler(nullptr);
+
+    if (mRes) {
+      mRes->OnError(NS_ERROR_FAILURE);
+    }
+  }
+
+  void RegisterModule() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    sBtA2dpInterface = mInterface;
+
+    if (mRes) {
+      mRes->Init();
+    }
+  }
+
+private:
+  BluetoothA2dpInterface* mInterface;
+  RefPtr<BluetoothProfileResultHandler> mRes;
 };
 
-#if ANDROID_VERSION > 17
-static btrc_callbacks_t sBtAvrcpCallbacks = {
-  sizeof(sBtAvrcpCallbacks),
-#if ANDROID_VERSION > 18
-  AvrcpRemoteFeaturesCallback,
-#endif
-  AvrcpGetPlayStatusCallback,
-  AvrcpListPlayerAppAttributeCallback,
-  AvrcpListPlayerAppValuesCallback,
-  AvrcpGetPlayerAppValueCallback,
-  AvrcpGetPlayerAppAttrsTextCallback,
-  AvrcpGetPlayerAppValuesTextCallback,
-  AvrcpSetPlayerAppValueCallback,
-  AvrcpGetElementAttrCallback,
-  AvrcpRegisterNotificationCallback,
-#if ANDROID_VERSION > 18
-  AvrcpRemoteVolumeChangedCallback,
-  AvrcpPassThroughCallback
-#endif
+class BluetoothA2dpManager::InitProfileResultHandlerRunnable final
+  : public nsRunnable
+{
+public:
+  InitProfileResultHandlerRunnable(BluetoothProfileResultHandler* aRes,
+                                   nsresult aRv)
+    : mRes(aRes)
+    , mRv(aRv)
+  {
+    MOZ_ASSERT(mRes);
+  }
+
+  NS_IMETHOD Run() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    if (NS_SUCCEEDED(mRv)) {
+      mRes->Init();
+    } else {
+      mRes->OnError(mRv);
+    }
+    return NS_OK;
+  }
+
+private:
+  RefPtr<BluetoothProfileResultHandler> mRes;
+  nsresult mRv;
 };
-#endif
 
 /*
  * This function will be only called when Bluetooth is turning on.
@@ -506,58 +165,79 @@ static btrc_callbacks_t sBtAvrcpCallbacks = {
  */
 // static
 void
-BluetoothA2dpManager::InitA2dpInterface()
+BluetoothA2dpManager::InitA2dpInterface(BluetoothProfileResultHandler* aRes)
 {
-  const bt_interface_t* btInf = GetBluetoothInterface();
-  NS_ENSURE_TRUE_VOID(btInf);
+  MOZ_ASSERT(NS_IsMainThread());
 
-  sBtA2dpInterface = (btav_interface_t *)btInf->
-    get_profile_interface(BT_PROFILE_ADVANCED_AUDIO_ID);
-  NS_ENSURE_TRUE_VOID(sBtA2dpInterface);
-
-  int ret = sBtA2dpInterface->init(&sBtA2dpCallbacks);
-  if (ret != BT_STATUS_SUCCESS) {
-    BT_LOGR("Warning: failed to init a2dp module");
+  if (sBtA2dpInterface) {
+    BT_LOGR("Bluetooth A2DP interface is already initalized.");
+    RefPtr<nsRunnable> r =
+      new InitProfileResultHandlerRunnable(aRes, NS_OK);
+    if (NS_FAILED(NS_DispatchToMainThread(r))) {
+      BT_LOGR("Failed to dispatch A2DP Init runnable");
+    }
+    return;
   }
 
-#if ANDROID_VERSION > 17
-  sBtAvrcpInterface = (btrc_interface_t *)btInf->
-    get_profile_interface(BT_PROFILE_AV_RC_ID);
-  NS_ENSURE_TRUE_VOID(sBtAvrcpInterface);
+  auto btInf = BluetoothInterface::GetInstance();
 
-  ret = sBtAvrcpInterface->init(&sBtAvrcpCallbacks);
-  if (ret != BT_STATUS_SUCCESS) {
-    BT_LOGR("Warning: failed to init avrcp module");
+  if (NS_WARN_IF(!btInf)) {
+    // If there's no Bluetooth interface, we dispatch a runnable
+    // that calls the profile result handler.
+    RefPtr<nsRunnable> r =
+      new InitProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
+    if (NS_FAILED(NS_DispatchToMainThread(r))) {
+      BT_LOGR("Failed to dispatch A2DP OnError runnable");
+    }
+    return;
   }
-#endif
+
+  auto setupInterface = btInf->GetBluetoothSetupInterface();
+
+  if (NS_WARN_IF(!setupInterface)) {
+    // If there's no Setup interface, we dispatch a runnable
+    // that calls the profile result handler.
+    RefPtr<nsRunnable> r =
+      new InitProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
+    if (NS_FAILED(NS_DispatchToMainThread(r))) {
+      BT_LOGR("Failed to dispatch A2DP OnError runnable");
+    }
+    return;
+  }
+
+  auto a2dpInterface = btInf->GetBluetoothA2dpInterface();
+
+  if (NS_WARN_IF(!a2dpInterface)) {
+    // If there's no A2DP interface, we dispatch a runnable
+    // that calls the profile result handler.
+    RefPtr<nsRunnable> r =
+      new InitProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
+    if (NS_FAILED(NS_DispatchToMainThread(r))) {
+      BT_LOGR("Failed to dispatch A2DP OnError runnable");
+    }
+    return;
+  }
+
+  // Set notification handler _before_ registering the module. It could
+  // happen that we receive notifications, before the result handler runs.
+  a2dpInterface->SetNotificationHandler(BluetoothA2dpManager::Get());
+
+  setupInterface->RegisterModule(
+    SETUP_SERVICE_ID_A2DP, 0, MAX_NUM_CLIENTS,
+    new RegisterModuleResultHandler(a2dpInterface, aRes));
 }
 
 BluetoothA2dpManager::~BluetoothA2dpManager()
+{ }
+
+void
+BluetoothA2dpManager::Uninit()
 {
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
   NS_ENSURE_TRUE_VOID(obs);
   if (NS_FAILED(obs->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID))) {
     BT_WARNING("Failed to remove shutdown observer!");
   }
-}
-
-void
-BluetoothA2dpManager::ResetA2dp()
-{
-  mA2dpConnected = false;
-  mSinkState = SinkState::SINK_DISCONNECTED;
-  mController = nullptr;
-}
-
-void
-BluetoothA2dpManager::ResetAvrcp()
-{
-  mAvrcpConnected = false;
-  mDuration = 0;
-  mMediaNumber = 0;
-  mTotalMediaCount = 0;
-  mPosition = 0;
-  mPlayStatus = ControlPlayStatus::PLAYSTATUS_UNKNOWN;
 }
 
 /*
@@ -597,28 +277,131 @@ BluetoothA2dpManager::Get()
   // If we're in shutdown, don't create a new instance
   NS_ENSURE_FALSE(sInShutdown, nullptr);
 
-  // Create a new instance, register, and return
-  BluetoothA2dpManager* manager = new BluetoothA2dpManager();
-  sBluetoothA2dpManager = manager;
+  // Create a new instance and return
+  sBluetoothA2dpManager = new BluetoothA2dpManager();
+
   return sBluetoothA2dpManager;
 }
 
+class BluetoothA2dpManager::UnregisterModuleResultHandler final
+  : public BluetoothSetupResultHandler
+{
+public:
+  UnregisterModuleResultHandler(BluetoothProfileResultHandler* aRes)
+    : mRes(aRes)
+  { }
+
+  void OnError(BluetoothStatus aStatus) override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    BT_WARNING("BluetoothSetupInterface::UnregisterModule failed for A2DP: %d",
+               (int)aStatus);
+
+    sBtA2dpInterface->SetNotificationHandler(nullptr);
+    sBtA2dpInterface = nullptr;
+
+    sBluetoothA2dpManager->Uninit();
+    sBluetoothA2dpManager = nullptr;
+
+    if (mRes) {
+      mRes->OnError(NS_ERROR_FAILURE);
+    }
+  }
+
+  void UnregisterModule() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    sBtA2dpInterface->SetNotificationHandler(nullptr);
+    sBtA2dpInterface = nullptr;
+
+    sBluetoothA2dpManager->Uninit();
+    sBluetoothA2dpManager = nullptr;
+
+    if (mRes) {
+      mRes->Deinit();
+    }
+  }
+
+private:
+  RefPtr<BluetoothProfileResultHandler> mRes;
+};
+
+class BluetoothA2dpManager::DeinitProfileResultHandlerRunnable final
+  : public nsRunnable
+{
+public:
+  DeinitProfileResultHandlerRunnable(BluetoothProfileResultHandler* aRes,
+                                     nsresult aRv)
+    : mRes(aRes)
+    , mRv(aRv)
+  {
+    MOZ_ASSERT(mRes);
+  }
+
+  NS_IMETHOD Run() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    if (NS_SUCCEEDED(mRv)) {
+      mRes->Deinit();
+    } else {
+      mRes->OnError(mRv);
+    }
+    return NS_OK;
+  }
+
+private:
+  RefPtr<BluetoothProfileResultHandler> mRes;
+  nsresult mRv;
+};
+
 // static
 void
-BluetoothA2dpManager::DeinitA2dpInterface()
+BluetoothA2dpManager::DeinitA2dpInterface(BluetoothProfileResultHandler* aRes)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (sBtA2dpInterface) {
-    sBtA2dpInterface->cleanup();
-    sBtA2dpInterface = nullptr;
+  if (!sBtA2dpInterface) {
+    BT_LOGR("Bluetooth A2DP interface has not been initalized.");
+    RefPtr<nsRunnable> r =
+      new DeinitProfileResultHandlerRunnable(aRes, NS_OK);
+    if (NS_FAILED(NS_DispatchToMainThread(r))) {
+      BT_LOGR("Failed to dispatch A2DP Deinit runnable");
+    }
+    return;
   }
-#if ANDROID_VERSION > 17
-  if (sBtAvrcpInterface) {
-    sBtAvrcpInterface->cleanup();
-    sBtAvrcpInterface = nullptr;
+
+  auto btInf = BluetoothInterface::GetInstance();
+
+  if (NS_WARN_IF(!btInf)) {
+    // If there's no backend interface, we dispatch a runnable
+    // that calls the profile result handler.
+    RefPtr<nsRunnable> r =
+      new DeinitProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
+    if (NS_FAILED(NS_DispatchToMainThread(r))) {
+      BT_LOGR("Failed to dispatch A2DP OnError runnable");
+    }
+    return;
   }
-#endif
+
+  auto setupInterface = btInf->GetBluetoothSetupInterface();
+
+  if (NS_WARN_IF(!setupInterface)) {
+    // If there's no Setup interface, we dispatch a runnable
+    // that calls the profile result handler.
+    RefPtr<nsRunnable> r =
+      new DeinitProfileResultHandlerRunnable(aRes, NS_ERROR_FAILURE);
+    if (NS_FAILED(NS_DispatchToMainThread(r))) {
+      BT_LOGR("Failed to dispatch A2DP OnError runnable");
+    }
+    return;
+  }
+
+  setupInterface->UnregisterModule(
+    SETUP_SERVICE_ID_A2DP,
+    new UnregisterModuleResultHandler(aRes));
 }
 
 void
@@ -631,11 +414,35 @@ BluetoothA2dpManager::HandleShutdown()
 }
 
 void
-BluetoothA2dpManager::Connect(const nsAString& aDeviceAddress,
+BluetoothA2dpManager::OnConnectError()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  mController->NotifyCompletion(NS_LITERAL_STRING(ERR_CONNECTION_FAILED));
+
+  mController = nullptr;
+  mDeviceAddress.Clear();
+}
+
+class BluetoothA2dpManager::ConnectResultHandler final
+  : public BluetoothA2dpResultHandler
+{
+public:
+  void OnError(BluetoothStatus aStatus) override
+  {
+    BT_LOGR("BluetoothA2dpInterface::Connect failed: %d", (int)aStatus);
+
+    NS_ENSURE_TRUE_VOID(sBluetoothA2dpManager);
+    sBluetoothA2dpManager->OnConnectError();
+  }
+};
+
+void
+BluetoothA2dpManager::Connect(const BluetoothAddress& aDeviceAddress,
                               BluetoothProfileController* aController)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!aDeviceAddress.IsEmpty());
+  MOZ_ASSERT(!aDeviceAddress.IsCleared());
   MOZ_ASSERT(aController);
 
   BluetoothService* bs = BluetoothService::Get();
@@ -658,16 +465,30 @@ BluetoothA2dpManager::Connect(const nsAString& aDeviceAddress,
     return;
   }
 
-  bt_bdaddr_t remoteAddress;
-  StringToBdAddressType(aDeviceAddress, &remoteAddress);
-
-  bt_status_t result = sBtA2dpInterface->connect(&remoteAddress);
-  if (BT_STATUS_SUCCESS != result) {
-    BT_LOGR("Failed to connect: %x", result);
-    aController->NotifyCompletion(NS_LITERAL_STRING(ERR_CONNECTION_FAILED));
-    return;
-  }
+  sBtA2dpInterface->Connect(mDeviceAddress, new ConnectResultHandler());
 }
+
+void
+BluetoothA2dpManager::OnDisconnectError()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  NS_ENSURE_TRUE_VOID(mController);
+
+  mController->NotifyCompletion(NS_LITERAL_STRING(ERR_DISCONNECTION_FAILED));
+}
+
+class BluetoothA2dpManager::DisconnectResultHandler final
+  : public BluetoothA2dpResultHandler
+{
+public:
+  void OnError(BluetoothStatus aStatus) override
+  {
+    BT_LOGR("BluetoothA2dpInterface::Disconnect failed: %d", (int)aStatus);
+
+    NS_ENSURE_TRUE_VOID(sBluetoothA2dpManager);
+    sBluetoothA2dpManager->OnDisconnectError();
+  }
+};
 
 void
 BluetoothA2dpManager::Disconnect(BluetoothProfileController* aController)
@@ -678,37 +499,34 @@ BluetoothA2dpManager::Disconnect(BluetoothProfileController* aController)
   BluetoothService* bs = BluetoothService::Get();
   if (!bs) {
     if (aController) {
-      aController->NotifyCompletion(NS_LITERAL_STRING(ERR_NO_AVAILABLE_RESOURCE));
+      aController->NotifyCompletion(
+        NS_LITERAL_STRING(ERR_NO_AVAILABLE_RESOURCE));
     }
     return;
   }
 
   if (!mA2dpConnected) {
     if (aController) {
-      aController->NotifyCompletion(NS_LITERAL_STRING(ERR_ALREADY_DISCONNECTED));
+      aController->NotifyCompletion(
+        NS_LITERAL_STRING(ERR_ALREADY_DISCONNECTED));
     }
     return;
   }
 
-  MOZ_ASSERT(!mDeviceAddress.IsEmpty());
+  MOZ_ASSERT(!mDeviceAddress.IsCleared());
 
   mController = aController;
 
   if (!sBtA2dpInterface) {
     BT_LOGR("sBluetoothA2dpInterface is null");
-    aController->NotifyCompletion(NS_LITERAL_STRING(ERR_NO_AVAILABLE_RESOURCE));
+    if (aController) {
+      aController->NotifyCompletion(
+        NS_LITERAL_STRING(ERR_NO_AVAILABLE_RESOURCE));
+    }
     return;
   }
 
-  bt_bdaddr_t remoteAddress;
-  StringToBdAddressType(mDeviceAddress, &remoteAddress);
-
-  bt_status_t result = sBtA2dpInterface->disconnect(&remoteAddress);
-  if (BT_STATUS_SUCCESS != result) {
-    BT_LOGR("Failed to disconnect: %x", result);
-    aController->NotifyCompletion(NS_LITERAL_STRING(ERR_DISCONNECTION_FAILED));
-    return;
-  }
+  sBtA2dpInterface->Disconnect(mDeviceAddress, new DisconnectResultHandler());
 }
 
 void
@@ -722,7 +540,7 @@ BluetoothA2dpManager::OnConnect(const nsAString& aErrorStr)
    */
   NS_ENSURE_TRUE_VOID(mController);
 
-  nsRefPtr<BluetoothProfileController> controller = mController.forget();
+  RefPtr<BluetoothProfileController> controller = mController.forget();
   controller->NotifyCompletion(aErrorStr);
 }
 
@@ -737,7 +555,7 @@ BluetoothA2dpManager::OnDisconnect(const nsAString& aErrorStr)
    */
   NS_ENSURE_TRUE_VOID(mController);
 
-  nsRefPtr<BluetoothProfileController> controller = mController.forget();
+  RefPtr<BluetoothProfileController> controller = mController.forget();
   controller->NotifyCompletion(aErrorStr);
 
   Reset();
@@ -768,14 +586,15 @@ BluetoothA2dpManager::HandleSinkPropertyChanged(const BluetoothSignal& aSignal)
   MOZ_ASSERT(aSignal.value().type() ==
              BluetoothValue::TArrayOfBluetoothNamedValue);
 
-  const nsString& address = aSignal.path();
+  BluetoothAddress address;
+  NS_ENSURE_TRUE_VOID(NS_SUCCEEDED(StringToAddress(aSignal.path(), address)));
+
   /**
    * Update sink property only if
    * - mDeviceAddress is empty (A2dp is disconnected), or
    * - this property change is from the connected sink.
    */
-  NS_ENSURE_TRUE_VOID(mDeviceAddress.IsEmpty() ||
-                      mDeviceAddress.Equals(address));
+  NS_ENSURE_TRUE_VOID(mDeviceAddress.IsCleared() || mDeviceAddress == address);
 
   const InfallibleTArray<BluetoothNamedValue>& arr =
     aSignal.value().get_ArrayOfBluetoothNamedValue();
@@ -838,11 +657,24 @@ BluetoothA2dpManager::HandleSinkPropertyChanged(const BluetoothSignal& aSignal)
 
       mA2dpConnected = false;
       NotifyConnectionStatusChanged();
-      mDeviceAddress.Truncate();
+      mDeviceAddress.Clear();
       OnDisconnect(EmptyString());
       break;
     default:
       break;
+  }
+}
+
+/*
+ * Reset connection state to DISCONNECTED to handle backend error. The state
+ * change triggers UI status bar update as ordinary bluetooth turn-off sequence.
+ */
+void
+BluetoothA2dpManager::HandleBackendError()
+{
+  if (mSinkState != SinkState::SINK_DISCONNECTED) {
+    ConnectionStateNotification(A2DP_CONNECTION_STATE_DISCONNECTED,
+                                mDeviceAddress);
   }
 }
 
@@ -855,9 +687,12 @@ BluetoothA2dpManager::NotifyConnectionStatusChanged()
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
   NS_ENSURE_TRUE_VOID(obs);
 
+  nsAutoString deviceAddressStr;
+  AddressToString(mDeviceAddress, deviceAddressStr);
+
   if (NS_FAILED(obs->NotifyObservers(this,
                                      BLUETOOTH_A2DP_STATUS_CHANGED_ID,
-                                     mDeviceAddress.get()))) {
+                                     deviceAddressStr.get()))) {
     BT_WARNING("Failed to notify bluetooth-a2dp-status-changed observsers!");
   }
 
@@ -867,19 +702,19 @@ BluetoothA2dpManager::NotifyConnectionStatusChanged()
 }
 
 void
-BluetoothA2dpManager::OnGetServiceChannel(const nsAString& aDeviceAddress,
-                                          const nsAString& aServiceUuid,
+BluetoothA2dpManager::OnGetServiceChannel(const BluetoothAddress& aDeviceAddress,
+                                          const BluetoothUuid& aServiceUuid,
                                           int aChannel)
 {
 }
 
 void
-BluetoothA2dpManager::OnUpdateSdpRecords(const nsAString& aDeviceAddress)
+BluetoothA2dpManager::OnUpdateSdpRecords(const BluetoothAddress& aDeviceAddress)
 {
 }
 
 void
-BluetoothA2dpManager::GetAddress(nsAString& aDeviceAddress)
+BluetoothA2dpManager::GetAddress(BluetoothAddress& aDeviceAddress)
 {
   aDeviceAddress = mDeviceAddress;
 }
@@ -891,229 +726,54 @@ BluetoothA2dpManager::IsConnected()
 }
 
 /*
- * In bluedroid stack case, there is no interface to know exactly
- * avrcp connection status. All connection are managed by bluedroid stack.
+ * Notifications
  */
-void
-BluetoothA2dpManager::SetAvrcpConnected(bool aConnected)
-{
-  mAvrcpConnected = aConnected;
-  if (!aConnected) {
-    ResetAvrcp();
-  }
-}
 
-bool
-BluetoothA2dpManager::IsAvrcpConnected()
-{
-  return mAvrcpConnected;
-}
-
-/*
- * This function only updates meta data in BluetoothA2dpManager
- * Send "Get Element Attributes response" in AvrcpGetElementAttrCallback
- */
 void
-BluetoothA2dpManager::UpdateMetaData(const nsAString& aTitle,
-                                     const nsAString& aArtist,
-                                     const nsAString& aAlbum,
-                                     uint64_t aMediaNumber,
-                                     uint64_t aTotalMediaCount,
-                                     uint32_t aDuration)
+BluetoothA2dpManager::ConnectionStateNotification(
+  BluetoothA2dpConnectionState aState, const BluetoothAddress& aBdAddr)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-#if ANDROID_VERSION > 17
-  NS_ENSURE_TRUE_VOID(sBtAvrcpInterface);
+  nsString a2dpState;
+  AvStatusToSinkString(aState, a2dpState);
 
-  // Send track changed and position changed if track num is not the same.
-  // See also AVRCP 1.3 Spec 5.4.2
-  if (mMediaNumber != aMediaNumber &&
-      mTrackChangedNotifyType == BTRC_NOTIFICATION_TYPE_INTERIM) {
-    btrc_register_notification_t param;
-    // convert to network big endian format
-    // since track stores as uint8[8]
-    // 56 = 8 * (BTRC_UID_SIZE -1)
-    for (int i = 0; i < BTRC_UID_SIZE; ++i) {
-      param.track[i] = (aMediaNumber >> (56 - 8 * i));
-    }
-    mTrackChangedNotifyType = BTRC_NOTIFICATION_TYPE_CHANGED;
-    sBtAvrcpInterface->register_notification_rsp(BTRC_EVT_TRACK_CHANGE,
-                                                 BTRC_NOTIFICATION_TYPE_CHANGED,
-                                                 &param);
-    if (mPlayPosChangedNotifyType == BTRC_NOTIFICATION_TYPE_INTERIM) {
-      param.song_pos = mPosition;
-      // EVENT_PLAYBACK_POS_CHANGED shall be notified if changed current track
-      mPlayPosChangedNotifyType = BTRC_NOTIFICATION_TYPE_CHANGED;
-      sBtAvrcpInterface->register_notification_rsp(
-        BTRC_EVT_PLAY_POS_CHANGED,
-        BTRC_NOTIFICATION_TYPE_CHANGED,
-        &param);
-    }
-  }
+  InfallibleTArray<BluetoothNamedValue> props;
+  AppendNamedValue(props, "State", a2dpState);
 
-  mTitle.Assign(aTitle);
-  mArtist.Assign(aArtist);
-  mAlbum.Assign(aAlbum);
-  mMediaNumber = aMediaNumber;
-  mTotalMediaCount = aTotalMediaCount;
-  mDuration = aDuration;
-#endif
+  nsAutoString addressStr;
+  AddressToString(aBdAddr, addressStr);
+
+  HandleSinkPropertyChanged(BluetoothSignal(NS_LITERAL_STRING("AudioSink"),
+                                            addressStr, props));
 }
 
-/*
- * This function is to reply AvrcpGetPlayStatusCallback (play-status-request)
- * from media player application (Gaia side)
- */
 void
-BluetoothA2dpManager::UpdatePlayStatus(uint32_t aDuration,
-                                       uint32_t aPosition,
-                                       ControlPlayStatus aPlayStatus)
+BluetoothA2dpManager::AudioStateNotification(BluetoothA2dpAudioState aState,
+                                             const BluetoothAddress& aBdAddr)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-#if ANDROID_VERSION > 17
-  NS_ENSURE_TRUE_VOID(sBtAvrcpInterface);
-  // always update playstatus first
-  sBtAvrcpInterface->get_play_status_rsp((btrc_play_status_t)aPlayStatus,
-                                         aDuration, aPosition);
-  // when play status changed, send both play status and position
-  if (mPlayStatus != aPlayStatus &&
-      mPlayStatusChangedNotifyType == BTRC_NOTIFICATION_TYPE_INTERIM) {
-    btrc_register_notification_t param;
-    param.play_status = (btrc_play_status_t)aPlayStatus;
-    mPlayStatusChangedNotifyType = BTRC_NOTIFICATION_TYPE_CHANGED;
-    sBtAvrcpInterface->register_notification_rsp(BTRC_EVT_PLAY_STATUS_CHANGED,
-                                                 BTRC_NOTIFICATION_TYPE_CHANGED,
-                                                 &param);
+  nsString a2dpState;
+
+  if (aState == A2DP_AUDIO_STATE_STARTED) {
+    a2dpState = NS_LITERAL_STRING("playing");
+  } else if (aState == A2DP_AUDIO_STATE_STOPPED) {
+    // for avdtp state stop stream
+    a2dpState = NS_LITERAL_STRING("connected");
+  } else if (aState == A2DP_AUDIO_STATE_REMOTE_SUSPEND) {
+    // for avdtp state suspend stream from remote side
+    a2dpState = NS_LITERAL_STRING("connected");
   }
 
-  if (mPosition != aPosition &&
-      mPlayPosChangedNotifyType == BTRC_NOTIFICATION_TYPE_INTERIM) {
-    btrc_register_notification_t param;
-    param.song_pos = aPosition;
-    mPlayPosChangedNotifyType = BTRC_NOTIFICATION_TYPE_CHANGED;
-    sBtAvrcpInterface->register_notification_rsp(BTRC_EVT_PLAY_POS_CHANGED,
-                                                 BTRC_NOTIFICATION_TYPE_CHANGED,
-                                                 &param);
-  }
+  InfallibleTArray<BluetoothNamedValue> props;
+  AppendNamedValue(props, "State", a2dpState);
 
-  mDuration = aDuration;
-  mPosition = aPosition;
-  mPlayStatus = aPlayStatus;
-#endif
-}
+  nsAutoString addressStr;
+  AddressToString(aBdAddr, addressStr);
 
-/*
- * This function handles RegisterNotification request from
- * AvrcpRegisterNotificationCallback, which updates current
- * track/status/position status in the INTERRIM response.
- *
- * aParam is only valid when position changed
- */
-void
-BluetoothA2dpManager::UpdateRegisterNotification(int aEventId, int aParam)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-#if ANDROID_VERSION > 17
-  NS_ENSURE_TRUE_VOID(sBtAvrcpInterface);
-
-  btrc_register_notification_t param;
-
-  switch (aEventId) {
-    case BTRC_EVT_PLAY_STATUS_CHANGED:
-      mPlayStatusChangedNotifyType = BTRC_NOTIFICATION_TYPE_INTERIM;
-      param.play_status = (btrc_play_status_t)mPlayStatus;
-      break;
-    case BTRC_EVT_TRACK_CHANGE:
-      // In AVRCP 1.3 and 1.4, the identifier parameter of EVENT_TRACK_CHANGED
-      // is different.
-      // AVRCP 1.4: If no track is selected, we shall return 0xFFFFFFFFFFFFFFFF,
-      // otherwise return 0x0 in the INTERRIM response. The expanded text in
-      // version 1.4 is to allow for new UID feature. As for AVRCP 1.3, we shall
-      // return 0xFFFFFFFF. Since PTS enforces to check this part to comply with
-      // the most updated spec.
-      mTrackChangedNotifyType = BTRC_NOTIFICATION_TYPE_INTERIM;
-      // needs to convert to network big endian format since track stores
-      // as uint8[8]. 56 = 8 * (BTRC_UID_SIZE -1).
-      for (int index = 0; index < BTRC_UID_SIZE; ++index) {
-        // We cannot easily check if a track is selected, so whenever A2DP is
-        // streaming, we assume a track is selected.
-        if (mSinkState == BluetoothA2dpManager::SinkState::SINK_PLAYING) {
-          param.track[index] = 0x0;
-        } else {
-          param.track[index] = 0xFF;
-        }
-      }
-      break;
-    case BTRC_EVT_PLAY_POS_CHANGED:
-      // If no track is selected, return 0xFFFFFFFF in the INTERIM response
-      mPlayPosChangedNotifyType = BTRC_NOTIFICATION_TYPE_INTERIM;
-      if (mSinkState == BluetoothA2dpManager::SinkState::SINK_PLAYING) {
-        param.song_pos = mPosition;
-      } else {
-        param.song_pos = 0xFFFFFFFF;
-      }
-      mPlaybackInterval = aParam;
-      break;
-    default:
-      break;
-  }
-
-  sBtAvrcpInterface->register_notification_rsp((btrc_event_id_t)aEventId,
-                                               BTRC_NOTIFICATION_TYPE_INTERIM,
-                                               &param);
-#endif
-}
-
-void
-BluetoothA2dpManager::GetAlbum(nsAString& aAlbum)
-{
-  aAlbum.Assign(mAlbum);
-}
-
-uint32_t
-BluetoothA2dpManager::GetDuration()
-{
-  return mDuration;
-}
-
-ControlPlayStatus
-BluetoothA2dpManager::GetPlayStatus()
-{
-  return mPlayStatus;
-}
-
-uint32_t
-BluetoothA2dpManager::GetPosition()
-{
-  return mPosition;
-}
-
-uint64_t
-BluetoothA2dpManager::GetMediaNumber()
-{
-  return mMediaNumber;
-}
-
-uint64_t
-BluetoothA2dpManager::GetTotalMediaNumber()
-{
-  return mTotalMediaCount;
-}
-
-void
-BluetoothA2dpManager::GetTitle(nsAString& aTitle)
-{
-  aTitle.Assign(mTitle);
-}
-
-void
-BluetoothA2dpManager::GetArtist(nsAString& aArtist)
-{
-  aArtist.Assign(mArtist);
+  HandleSinkPropertyChanged(BluetoothSignal(NS_LITERAL_STRING("AudioSink"),
+                                            addressStr, props));
 }
 
 NS_IMPL_ISUPPORTS(BluetoothA2dpManager, nsIObserver)
-

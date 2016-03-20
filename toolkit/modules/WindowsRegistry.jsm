@@ -7,7 +7,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 this.EXPORTED_SYMBOLS = ["WindowsRegistry"];
 
-const WindowsRegistry = {
+var WindowsRegistry = {
   /**
    * Safely reads a value from the registry.
    *
@@ -32,7 +32,7 @@ const WindowsRegistry = {
           case kRegMultiSz:
             // nsIWindowsRegKey doesn't support REG_MULTI_SZ type out of the box.
             let str = registry.readStringValue(aKey);
-            return [v for each (v in str.split("\0")) if (v)];
+            return str.split("\0").filter(v => v);
           case Ci.nsIWindowsRegKey.TYPE_STRING:
             return registry.readStringValue(aKey);
           case Ci.nsIWindowsRegKey.TYPE_INT:
@@ -47,4 +47,30 @@ const WindowsRegistry = {
     }
     return undefined;
   },
+
+  /**
+   * Safely removes a key from the registry.
+   *
+   * @param aRoot
+   *        The root registry to use.
+   * @param aPath
+   *        The registry path to the key.
+   * @param aKey
+   *        The key name.
+   */
+  removeRegKey: function(aRoot, aPath, aKey) {
+    let registry = Cc["@mozilla.org/windows-registry-key;1"].
+                   createInstance(Ci.nsIWindowsRegKey);
+    try {
+      let mode = Ci.nsIWindowsRegKey.ACCESS_QUERY_VALUE |
+                 Ci.nsIWindowsRegKey.ACCESS_SET_VALUE;
+      registry.open(aRoot, aPath, mode);
+      if (registry.hasValue(aKey)) {
+        registry.removeValue(aKey);
+      }
+    } catch (ex) {
+    } finally {
+      registry.close();
+    }
+  }
 };

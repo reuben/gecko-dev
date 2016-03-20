@@ -8,9 +8,22 @@ HOST_SOURCES += [
     'bsdiff.c',
 ]
 
-HOST_PROGRAM = 'mbsdiff'
+HostProgram('mbsdiff')
+
+if CONFIG['MOZ_SYSTEM_BZ2']:
+    HOST_OS_LIBS += CONFIG['MOZ_BZ2_LIBS']
+else:
+    HOST_USE_LIBS += [
+        'hostbz2',
+    ]
+
+if CONFIG['HOST_OS_ARCH'] == 'WINNT':
+    HOST_OS_LIBS += [
+        'ws2_32',
+    ]
 
 LOCAL_INCLUDES += [
     '/toolkit/mozapps/update/updater',
 ]
 
+HOST_CXXFLAGS += CONFIG['MOZ_BZ2_CFLAGS']

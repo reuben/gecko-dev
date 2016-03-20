@@ -31,7 +31,7 @@ static uint32_t const CHECK_MULTITHREADED = nsICacheStorage::CHECK_MULTITHREADED
 namespace mozilla {
 namespace net {
 
-namespace { // anon
+namespace {
 
 // Fires the doom callback back on the main thread
 // after the cache I/O thread is looped.
@@ -39,7 +39,7 @@ namespace { // anon
 class DoomCallbackSynchronizer : public nsRunnable
 {
 public:
-  DoomCallbackSynchronizer(nsICacheEntryDoomCallback* cb) : mCB(cb)
+  explicit DoomCallbackSynchronizer(nsICacheEntryDoomCallback* cb) : mCB(cb)
   {
     MOZ_COUNT_CTOR(DoomCallbackSynchronizer);
   }
@@ -92,7 +92,7 @@ class DoomCallbackWrapper : public nsICacheListener
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSICACHELISTENER
 
-  DoomCallbackWrapper(nsICacheEntryDoomCallback* cb) : mCB(cb)
+  explicit DoomCallbackWrapper(nsICacheEntryDoomCallback* cb) : mCB(cb)
   {
     MOZ_COUNT_CTOR(DoomCallbackWrapper);
   }
@@ -125,7 +125,7 @@ NS_IMETHODIMP DoomCallbackWrapper::OnCacheEntryDoomed(nsresult status)
   return NS_OK;
 }
 
-} // anon
+} // namespace
 
 // _OldVisitCallbackWrapper
 // Receives visit callbacks from the old API and forwards it to the new API
@@ -268,7 +268,7 @@ NS_IMETHODIMP _OldVisitCallbackWrapper::VisitEntry(const char * deviceID,
 
   // Send them to the consumer.
   rv = mCB->OnCacheEntryInfo(
-    uri, enhanceId, (int64_t)dataSize, fetchCount, lastModified, expirationTime);
+    uri, enhanceId, (int64_t)dataSize, fetchCount, lastModified, expirationTime, false);
 
   *_retval = NS_SUCCEEDED(rv);
   return NS_OK;
@@ -285,7 +285,7 @@ nsresult _OldGetDiskConsumption::Get(nsICacheStorageConsumptionObserver* aCallba
       do_GetService(NS_CACHESERVICE_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsRefPtr<_OldGetDiskConsumption> cb = new _OldGetDiskConsumption(aCallback);
+  RefPtr<_OldGetDiskConsumption> cb = new _OldGetDiskConsumption(aCallback);
 
   // _OldGetDiskConsumption stores the found size value, but until dispatched
   // to the main thread it doesn't call on the consupmtion observer. See bellow.
@@ -366,11 +366,23 @@ _OldCacheEntryWrapper::~_OldCacheEntryWrapper()
   LOG(("Destroying _OldCacheEntryWrapper %p for descriptor %p", this, mOldInfo.get()));
 }
 
+NS_IMETHODIMP _OldCacheEntryWrapper::GetIsForcedValid(bool *aIsForcedValid)
+{
+  // Unused stub
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP _OldCacheEntryWrapper::ForceValidFor(uint32_t aSecondsToTheFuture)
+{
+  // Unused stub
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 NS_IMPL_ISUPPORTS(_OldCacheEntryWrapper, nsICacheEntry)
 
 NS_IMETHODIMP _OldCacheEntryWrapper::AsyncDoom(nsICacheEntryDoomCallback* listener)
 {
-  nsRefPtr<DoomCallbackWrapper> cb = listener
+  RefPtr<DoomCallbackWrapper> cb = listener
     ? new DoomCallbackWrapper(listener)
     : nullptr;
   return AsyncDoom(cb);
@@ -478,7 +490,7 @@ NS_IMETHODIMP _OldCacheEntryWrapper::HasWriteAccess(bool aWriteAllowed_unused, b
   return NS_OK;
 }
 
-namespace { // anon
+namespace {
 
 class MetaDataVisitorWrapper : public nsICacheMetaDataVisitor
 {
@@ -486,7 +498,7 @@ class MetaDataVisitorWrapper : public nsICacheMetaDataVisitor
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSICACHEMETADATAVISITOR
-  MetaDataVisitorWrapper(nsICacheEntryMetaDataVisitor* cb) : mCB(cb) {}
+  explicit MetaDataVisitorWrapper(nsICacheEntryMetaDataVisitor* cb) : mCB(cb) {}
   nsCOMPtr<nsICacheEntryMetaDataVisitor> mCB;
 };
 
@@ -501,23 +513,22 @@ MetaDataVisitorWrapper::VisitMetaDataElement(char const * key,
   return mCB->OnMetaDataElement(key, value);
 }
 
-} // anon
+} // namespace
 
 NS_IMETHODIMP _OldCacheEntryWrapper::VisitMetaData(nsICacheEntryMetaDataVisitor* cb)
 {
-  nsRefPtr<MetaDataVisitorWrapper> w = new MetaDataVisitorWrapper(cb);
+  RefPtr<MetaDataVisitorWrapper> w = new MetaDataVisitorWrapper(cb);
   return mOldDesc->VisitMetaData(w);
 }
 
-namespace { // anon
+namespace {
 
 nsresult
 GetCacheSessionNameForStoragePolicy(
         nsCSubstring const &scheme,
         nsCacheStoragePolicy storagePolicy,
         bool isPrivate,
-        uint32_t appId,
-        bool inBrowser,
+        NeckoOriginAttributes const *originAttribs,
         nsACString& sessionName)
 {
   MOZ_ASSERT(!isPrivate || storagePolicy == nsICache::STORE_IN_MEMORY);
@@ -570,12 +581,9 @@ GetCacheSessionNameForStoragePolicy(
       sessionName.AppendLiteral("-private");
   }
 
-  if (appId != nsILoadContextInfo::NO_APP_ID || inBrowser) {
-    sessionName.Append('~');
-    sessionName.AppendInt(appId);
-    sessionName.Append('~');
-    sessionName.AppendInt(inBrowser);
-  }
+  nsAutoCString suffix;
+  originAttribs->CreateSuffix(suffix);
+  sessionName.Append(suffix);
 
   return NS_OK;
 }
@@ -606,8 +614,7 @@ GetCacheSession(nsCSubstring const &aScheme,
       aScheme,
       storagePolicy,
       aLoadInfo->IsPrivate(),
-      aLoadInfo->AppId(),
-      aLoadInfo->IsInBrowserElement(),
+      aLoadInfo->OriginAttributesPtr(),
       clientId);
     NS_ENSURE_SUCCESS(rv, rv);
   }
@@ -643,7 +650,7 @@ GetCacheSession(nsCSubstring const &aScheme,
   return NS_OK;
 }
 
-} // anon
+} // namespace
 
 
 NS_IMPL_ISUPPORTS_INHERITED(_OldCacheLoad, nsRunnable, nsICacheListener)
@@ -934,7 +941,7 @@ NS_IMETHODIMP _OldStorage::AsyncOpenURI(nsIURI *aURI,
     }
   }
 
-  nsRefPtr<_OldCacheLoad> cacheLoad =
+  RefPtr<_OldCacheLoad> cacheLoad =
     new _OldCacheLoad(scheme, cacheKey, aCallback, mAppCache,
                       mLoadInfo, mWriteToDisk, aFlags);
 
@@ -942,6 +949,12 @@ NS_IMETHODIMP _OldStorage::AsyncOpenURI(nsIURI *aURI,
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
+}
+
+NS_IMETHODIMP _OldStorage::OpenTruncate(nsIURI *aURI, const nsACString & aIdExtension,
+                                        nsICacheEntry **aCacheEntry)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP _OldStorage::Exists(nsIURI *aURI, const nsACString & aIdExtension,
@@ -966,7 +979,7 @@ NS_IMETHODIMP _OldStorage::AsyncDoomURI(nsIURI *aURI, const nsACString & aIdExte
                        getter_AddRefs(session));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsRefPtr<DoomCallbackWrapper> cb = aCallback
+  RefPtr<DoomCallbackWrapper> cb = aCallback
     ? new DoomCallbackWrapper(aCallback)
     : nullptr;
   rv = session->DoomEntry(cacheKey, cb);
@@ -982,72 +995,52 @@ NS_IMETHODIMP _OldStorage::AsyncEvictStorage(nsICacheEntryDoomCallback* aCallbac
   nsresult rv;
 
   if (!mAppCache && mOfflineStorage) {
-    // Special casing for pure offline storage
-    if (mLoadInfo->AppId() == nsILoadContextInfo::NO_APP_ID &&
-        !mLoadInfo->IsInBrowserElement()) {
+    nsCOMPtr<nsIApplicationCacheService> appCacheService =
+      do_GetService(NS_APPLICATIONCACHESERVICE_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      // Clear everything.
-      nsCOMPtr<nsICacheService> serv =
-          do_GetService(NS_CACHESERVICE_CONTRACTID, &rv);
-      NS_ENSURE_SUCCESS(rv, rv);
+    rv = appCacheService->Evict(mLoadInfo);
+    NS_ENSURE_SUCCESS(rv, rv);
+  } else if (mAppCache) {
+    nsCOMPtr<nsICacheSession> session;
+    rv = GetCacheSession(EmptyCString(),
+                          mWriteToDisk, mLoadInfo, mAppCache,
+                          getter_AddRefs(session));
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      rv = nsCacheService::GlobalInstance()->EvictEntriesInternal(nsICache::STORE_OFFLINE);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-    else {
-      // Clear app or inbrowser staff.
-      nsCOMPtr<nsIApplicationCacheService> appCacheService =
-        do_GetService(NS_APPLICATIONCACHESERVICE_CONTRACTID, &rv);
-      NS_ENSURE_SUCCESS(rv, rv);
+    rv = session->EvictEntries();
+    NS_ENSURE_SUCCESS(rv, rv);
+  } else {
+    // Oh, I'll be so happy when session names are gone...
+    nsCOMPtr<nsICacheSession> session;
+    rv = GetCacheSession(NS_LITERAL_CSTRING("http"),
+                          mWriteToDisk, mLoadInfo, mAppCache,
+                          getter_AddRefs(session));
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      rv = appCacheService->DiscardByAppId(mLoadInfo->AppId(),
-                                           mLoadInfo->IsInBrowserElement());
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-  }
-  else {
-    if (mAppCache) {
-      nsCOMPtr<nsICacheSession> session;
-      rv = GetCacheSession(EmptyCString(),
-                           mWriteToDisk, mLoadInfo, mAppCache,
-                           getter_AddRefs(session));
-      NS_ENSURE_SUCCESS(rv, rv);
+    rv = session->EvictEntries();
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      rv = session->EvictEntries();
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-    else {
-      // Oh, I'll be so happy when session names are gone...
-      nsCOMPtr<nsICacheSession> session;
-      rv = GetCacheSession(NS_LITERAL_CSTRING("http"),
-                           mWriteToDisk, mLoadInfo, mAppCache,
-                           getter_AddRefs(session));
-      NS_ENSURE_SUCCESS(rv, rv);
+    rv = GetCacheSession(NS_LITERAL_CSTRING("wyciwyg"),
+                          mWriteToDisk, mLoadInfo, mAppCache,
+                          getter_AddRefs(session));
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      rv = session->EvictEntries();
-      NS_ENSURE_SUCCESS(rv, rv);
+    rv = session->EvictEntries();
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      rv = GetCacheSession(NS_LITERAL_CSTRING("wyciwyg"),
-                           mWriteToDisk, mLoadInfo, mAppCache,
-                           getter_AddRefs(session));
-      NS_ENSURE_SUCCESS(rv, rv);
+    // This clears any data from scheme other then http, wyciwyg or ftp
+    rv = GetCacheSession(EmptyCString(),
+                          mWriteToDisk, mLoadInfo, mAppCache,
+                          getter_AddRefs(session));
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      rv = session->EvictEntries();
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      // This clears any data from scheme other then http, wyciwyg or ftp
-      rv = GetCacheSession(EmptyCString(),
-                           mWriteToDisk, mLoadInfo, mAppCache,
-                           getter_AddRefs(session));
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      rv = session->EvictEntries();
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
+    rv = session->EvictEntries();
+    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   if (aCallback) {
-    nsRefPtr<DoomCallbackSynchronizer> sync =
+    RefPtr<DoomCallbackSynchronizer> sync =
       new DoomCallbackSynchronizer(aCallback);
     rv = sync->Dispatch();
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1078,7 +1071,7 @@ NS_IMETHODIMP _OldStorage::AsyncVisitStorage(nsICacheStorageVisitor* aVisitor,
     deviceID = const_cast<char*>("disk");
   }
 
-  nsRefPtr<_OldVisitCallbackWrapper> cb = new _OldVisitCallbackWrapper(
+  RefPtr<_OldVisitCallbackWrapper> cb = new _OldVisitCallbackWrapper(
     deviceID, aVisitor, aVisitEntries, mLoadInfo);
   rv = nsCacheService::GlobalInstance()->VisitEntriesInternal(cb);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1153,5 +1146,5 @@ nsresult _OldStorage::ChooseApplicationCache(nsCSubstring const &cacheKey,
   return NS_OK;
 }
 
-} // net
-} // mozilla
+} // namespace net
+} // namespace mozilla

@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,11 +22,12 @@
 
 #include "nsXPCOM.h"
 
-class NS_COM_GLUE nsCategoryObserver MOZ_FINAL : public nsIObserver
+class nsCategoryObserver final : public nsIObserver
 {
-public:
-  nsCategoryObserver(const char* aCategory);
   ~nsCategoryObserver();
+
+public:
+  explicit nsCategoryObserver(const char* aCategory);
 
   void ListenerDied();
   nsInterfaceHashtable<nsCStringHashKey, nsISupports>& GetHash()
@@ -50,7 +53,7 @@ private:
  * then get the name of the category.
  */
 template<class T>
-class nsCategoryCache MOZ_FINAL
+class nsCategoryCache final
 {
 public:
   explicit nsCategoryCache(const char* aCategory)
@@ -72,28 +75,21 @@ public:
       mObserver = new nsCategoryObserver(mCategoryName.get());
     }
 
-    mObserver->GetHash().EnumerateRead(EntriesToArray, &aResult);
+    for (auto iter = mObserver->GetHash().Iter(); !iter.Done(); iter.Next()) {
+      nsISupports* entry = iter.UserData();
+      nsCOMPtr<T> service = do_QueryInterface(entry);
+      if (service) {
+        aResult.AppendObject(service);
+      }
+    }
   }
 
 private:
   // Not to be implemented
   nsCategoryCache(const nsCategoryCache<T>&);
 
-  static PLDHashOperator EntriesToArray(const nsACString& aKey,
-                                        nsISupports* aEntry, void* aArg)
-  {
-    nsCOMArray<T>& entries = *static_cast<nsCOMArray<T>*>(aArg);
-
-    nsCOMPtr<T> service = do_QueryInterface(aEntry);
-    if (service) {
-      entries.AppendObject(service);
-    }
-    return PL_DHASH_NEXT;
-  }
-
   nsCString mCategoryName;
-  nsRefPtr<nsCategoryObserver> mObserver;
-
+  RefPtr<nsCategoryObserver> mObserver;
 };
 
 #endif

@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,7 +21,7 @@
  * @see nsTObserverArray, nsTArray
  */
 
-class NS_COM_GLUE nsTObserverArray_base
+class nsTObserverArray_base
 {
 public:
   typedef size_t index_type;
@@ -260,10 +261,12 @@ public:
   void Compact() { mArray.Compact(); }
 
   // Returns the number of bytes on the heap taken up by this object, not
-  // including sizeof(*this).
-  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+  // including sizeof(*this). If you want to measure anything hanging off the
+  // array, you must iterate over the elements and measure them individually;
+  // hence the "Shallow" prefix.
+  size_t ShallowSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
-    return mArray.SizeOfExcludingThis(aMallocSizeOf);
+    return mArray.ShallowSizeOfExcludingThis(aMallocSizeOf);
   }
 
   //
@@ -310,7 +313,7 @@ public:
     typedef nsAutoTObserverArray<T, N> array_type;
     typedef Iterator                   base_type;
 
-    ForwardIterator(const array_type& aArray)
+    explicit ForwardIterator(const array_type& aArray)
       : Iterator(0, aArray)
     {
     }
@@ -353,7 +356,7 @@ public:
     typedef nsAutoTObserverArray<T, N> array_type;
     typedef Iterator                   base_type;
 
-    EndLimitedIterator(const array_type& aArray)
+    explicit EndLimitedIterator(const array_type& aArray)
       : ForwardIterator(aArray)
       , mEnd(aArray, aArray.Length())
     {
@@ -390,7 +393,7 @@ public:
     typedef nsAutoTObserverArray<T, N> array_type;
     typedef Iterator                   base_type;
 
-    BackwardIterator(const array_type& aArray)
+    explicit BackwardIterator(const array_type& aArray)
       : Iterator(aArray.Length(), aArray)
     {
     }
@@ -419,7 +422,7 @@ public:
   };
 
 protected:
-  nsAutoTArray<T, N> mArray;
+  AutoTArray<T, N> mArray;
 };
 
 template<class T>
@@ -469,7 +472,7 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
 #define NS_OBSERVER_ARRAY_NOTIFY_XPCOM_OBSERVERS(array_, obstype_, func_, params_) \
   PR_BEGIN_MACRO                                                             \
     nsTObserverArray<obstype_ *>::ForwardIterator iter_(array_);             \
-    nsRefPtr<obstype_> obs_;                                                 \
+    RefPtr<obstype_> obs_;                                                 \
     while (iter_.HasMore()) {                                                 \
       obs_ = iter_.GetNext();                                                \
       obs_ -> func_ params_ ;                                                \
@@ -484,6 +487,19 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
     while (iter_.HasMore()) {                                                \
       obs_ = iter_.GetNext();                                                \
       obs_ -> func_ params_ ;                                                \
+    }                                                                        \
+  PR_END_MACRO
+
+#define NS_OBSERVER_ARRAY_NOTIFY_OBSERVERS_WITH_QI(array_, basetype_, obstype_, func_, params_) \
+  PR_BEGIN_MACRO                                                             \
+    nsTObserverArray<basetype_ *>::ForwardIterator iter_(array_);            \
+    basetype_* obsbase_;                                                     \
+    while (iter_.HasMore()) {                                                \
+      obsbase_ = iter_.GetNext();                                            \
+      nsCOMPtr<obstype_> obs_ = do_QueryInterface(obsbase_);                 \
+      if (obs_) {                                                            \
+        obs_ -> func_ params_ ;                                              \
+      }                                                                      \
     }                                                                        \
   PR_END_MACRO
 #endif // nsTObserverArray_h___

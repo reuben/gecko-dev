@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -41,15 +43,15 @@
 
 namespace mozilla {
 
-int32_t NS_COM_GLUE CompareVersions(const char* aStrA, const char* aStrB);
+int32_t CompareVersions(const char* aStrA, const char* aStrB);
 
 #ifdef XP_WIN
-int32_t NS_COM_GLUE CompareVersions(const char16_t* aStrA, const char16_t* aStrB);
+int32_t CompareVersions(const char16_t* aStrA, const char16_t* aStrB);
 #endif
 
-struct NS_COM_GLUE Version
+struct Version
 {
-  Version(const char* aVersionString)
+  explicit Version(const char* aVersionString)
   {
     versionContent = strdup(aVersionString);
   }
@@ -88,13 +90,37 @@ struct NS_COM_GLUE Version
   {
     return CompareVersions(versionContent, aRhs.ReadContent()) != 0;
   }
+  bool operator<(const char* aRhs) const
+  {
+    return CompareVersions(versionContent, aRhs) == -1;
+  }
+  bool operator<=(const char* aRhs) const
+  {
+    return CompareVersions(versionContent, aRhs) < 1;
+  }
+  bool operator>(const char* aRhs) const
+  {
+    return CompareVersions(versionContent, aRhs) == 1;
+  }
+  bool operator>=(const char* aRhs) const
+  {
+    return CompareVersions(versionContent, aRhs) > -1;
+  }
+  bool operator==(const char* aRhs) const
+  {
+    return CompareVersions(versionContent, aRhs) == 0;
+  }
+  bool operator!=(const char* aRhs) const
+  {
+    return CompareVersions(versionContent, aRhs) != 0;
+  }
 
 private:
   char* versionContent;
 };
 
 #ifdef XP_WIN
-struct NS_COM_GLUE VersionW
+struct VersionW
 {
   VersionW(const char16_t* aVersionStringW)
   {

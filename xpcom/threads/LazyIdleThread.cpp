@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -109,7 +109,7 @@ LazyIdleThread::EnableIdleTimeout()
 
   if (mThread) {
     nsCOMPtr<nsIRunnable> runnable(new nsRunnable());
-    if (NS_FAILED(Dispatch(runnable, NS_DISPATCH_NORMAL))) {
+    if (NS_FAILED(Dispatch(runnable.forget(), NS_DISPATCH_NORMAL))) {
       NS_WARNING("Failed to dispatch!");
     }
   }
@@ -229,14 +229,16 @@ LazyIdleThread::ScheduleTimer()
     shouldSchedule = !mIdleNotificationCount && !mPendingEventCount;
   }
 
-  if (NS_FAILED(mIdleTimer->Cancel())) {
-    NS_WARNING("Failed to cancel timer!");
-  }
+  if (mIdleTimer) {
+    if (NS_FAILED(mIdleTimer->Cancel())) {
+      NS_WARNING("Failed to cancel timer!");
+    }
 
-  if (shouldSchedule &&
-      NS_FAILED(mIdleTimer->InitWithCallback(this, mIdleTimeoutMS,
-                                             nsITimer::TYPE_ONE_SHOT))) {
-    NS_WARNING("Failed to schedule timer!");
+    if (shouldSchedule &&
+        NS_FAILED(mIdleTimer->InitWithCallback(this, mIdleTimeoutMS,
+                                               nsITimer::TYPE_ONE_SHOT))) {
+      NS_WARNING("Failed to schedule timer!");
+    }
   }
 }
 
@@ -248,9 +250,21 @@ LazyIdleThread::ShutdownThread()
   // Before calling Shutdown() on the real thread we need to put a queue in
   // place in case a runnable is posted to the thread while it's in the
   // process of shutting down. This will be our queue.
-  nsAutoTArray<nsCOMPtr<nsIRunnable>, 10> queuedRunnables;
+  AutoTArray<nsCOMPtr<nsIRunnable>, 10> queuedRunnables;
 
   nsresult rv;
+
+  // Make sure to cancel the shutdown timer before spinning the event loop
+  // during |mThread->Shutdown()| below. Otherwise the timer might fire and we
+  // could reenter here.
+  if (mIdleTimer) {
+    rv = mIdleTimer->Cancel();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    mIdleTimer = nullptr;
+  }
 
   if (mThread) {
     if (mShutdownMethod == AutomaticShutdown && NS_IsMainThread()) {
@@ -284,7 +298,7 @@ LazyIdleThread::ShutdownThread()
 
     PreDispatch();
 
-    rv = mThread->Dispatch(runnable, NS_DISPATCH_NORMAL);
+    rv = mThread->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -311,15 +325,6 @@ LazyIdleThread::ShutdownThread()
     }
   }
 
-  if (mIdleTimer) {
-    rv = mIdleTimer->Cancel();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    mIdleTimer = nullptr;
-  }
-
   // If our temporary queue has any runnables then we need to dispatch them.
   if (queuedRunnables.Length()) {
     // If the thread manager has gone away then these runnables will never run.
@@ -334,7 +339,7 @@ LazyIdleThread::ShutdownThread()
       runnable.swap(queuedRunnables[index]);
       MOZ_ASSERT(runnable, "Null runnable?!");
 
-      if (NS_FAILED(Dispatch(runnable, NS_DISPATCH_NORMAL))) {
+      if (NS_FAILED(Dispatch(runnable.forget(), NS_DISPATCH_NORMAL))) {
         NS_ERROR("Failed to re-dispatch queued runnable!");
       }
     }
@@ -386,20 +391,32 @@ NS_IMPL_QUERY_INTERFACE(LazyIdleThread, nsIThread,
                         nsIObserver)
 
 NS_IMETHODIMP
-LazyIdleThread::Dispatch(nsIRunnable* aEvent,
+LazyIdleThread::DispatchFromScript(nsIRunnable* aEvent, uint32_t aFlags)
+{
+  nsCOMPtr<nsIRunnable> event(aEvent);
+  return Dispatch(event.forget(), aFlags);
+}
+
+NS_IMETHODIMP
+LazyIdleThread::Dispatch(already_AddRefed<nsIRunnable>&& aEvent,
                          uint32_t aFlags)
 {
   ASSERT_OWNING_THREAD();
+  nsCOMPtr<nsIRunnable> event(aEvent); // avoid leaks
 
   // LazyIdleThread can't always support synchronous dispatch currently.
   if (NS_WARN_IF(aFlags != NS_DISPATCH_NORMAL)) {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
+  if (NS_WARN_IF(mShutdown)) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
   // If our thread is shutting down then we can't actually dispatch right now.
   // Queue this runnable for later.
   if (UseRunnableQueue()) {
-    mQueuedRunnables->AppendElement(aEvent);
+    mQueuedRunnables->AppendElement(event);
     return NS_OK;
   }
 
@@ -410,7 +427,7 @@ LazyIdleThread::Dispatch(nsIRunnable* aEvent,
 
   PreDispatch();
 
-  return mThread->Dispatch(aEvent, aFlags);
+  return mThread->Dispatch(event.forget(), aFlags);
 }
 
 NS_IMETHODIMP
@@ -433,6 +450,13 @@ LazyIdleThread::GetPRThread(PRThread** aPRThread)
 
   *aPRThread = nullptr;
   return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
+LazyIdleThread::AsyncShutdown()
+{
+  ASSERT_OWNING_THREAD();
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
@@ -505,15 +529,13 @@ LazyIdleThread::OnDispatchedEvent(nsIThreadInternal* /*aThread */)
 
 NS_IMETHODIMP
 LazyIdleThread::OnProcessNextEvent(nsIThreadInternal* /* aThread */,
-                                   bool /* aMayWait */,
-                                   uint32_t /* aRecursionDepth */)
+                                   bool /* aMayWait */)
 {
   return NS_OK;
 }
 
 NS_IMETHODIMP
 LazyIdleThread::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
-                                      uint32_t /* aRecursionDepth */,
                                       bool aEventWasProcessed)
 {
   bool shouldNotifyIdle;
@@ -544,7 +566,7 @@ LazyIdleThread::AfterProcessNextEvent(nsIThreadInternal* /* aThread */,
       return NS_ERROR_UNEXPECTED;
     }
 
-    nsresult rv = mOwningThread->Dispatch(runnable, NS_DISPATCH_NORMAL);
+    nsresult rv = mOwningThread->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }

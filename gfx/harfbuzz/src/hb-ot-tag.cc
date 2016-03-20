@@ -57,7 +57,7 @@ hb_ot_old_tag_from_script (hb_script_t script)
   }
 
   /* Else, just change first char to lowercase and return */
-  return ((hb_tag_t) script) | 0x20000000;
+  return ((hb_tag_t) script) | 0x20000000u;
 }
 
 static hb_script_t
@@ -70,13 +70,13 @@ hb_ot_old_tag_to_script (hb_tag_t tag)
 
   /* Any spaces at the end of the tag are replaced by repeating the last
    * letter.  Eg 'nko ' -> 'Nkoo' */
-  if (unlikely ((tag & 0x0000FF00) == 0x00002000))
-    tag |= (tag >> 8) & 0x0000FF00; /* Copy second letter to third */
-  if (unlikely ((tag & 0x000000FF) == 0x00000020))
-    tag |= (tag >> 8) & 0x000000FF; /* Copy third letter to fourth */
+  if (unlikely ((tag & 0x0000FF00u) == 0x00002000u))
+    tag |= (tag >> 8) & 0x0000FF00u; /* Copy second letter to third */
+  if (unlikely ((tag & 0x000000FFu) == 0x00000020u))
+    tag |= (tag >> 8) & 0x000000FFu; /* Copy third letter to fourth */
 
   /* Change first char to uppercase and return */
-  return (hb_script_t) (tag & ~0x20000000);
+  return (hb_script_t) (tag & ~0x20000000u);
 }
 
 static hb_tag_t
@@ -146,7 +146,7 @@ hb_ot_tags_from_script (hb_script_t  script,
 hb_script_t
 hb_ot_tag_to_script (hb_tag_t tag)
 {
-  if (unlikely ((tag & 0x000000FF) == '2'))
+  if (unlikely ((tag & 0x000000FFu) == '2'))
     return hb_ot_new_tag_to_script (tag);
 
   return hb_ot_old_tag_to_script (tag);
@@ -156,7 +156,7 @@ hb_ot_tag_to_script (hb_tag_t tag)
 /* hb_language_t */
 
 typedef struct {
-  char language[6];
+  char language[4];
   hb_tag_t tag;
 } LangTag;
 
@@ -175,6 +175,11 @@ typedef struct {
  *
  * Some items still missing.  Those are commented out at the end.
  * Keep sorted for bsearch.
+ *
+ * Updated as of 2015-05-06: OT1.7 on MS website has some newer
+ * items that we don't have here, eg. Zazaki.  This is the new
+ * items in OpenType 1.7 (red items), most of which we have:
+ * http://www.microsoft.com/typography/otspec170/languagetags.htm
  */
 
 static const LangTag ot_languages[] = {
@@ -217,9 +222,9 @@ static const LangTag ot_languages[] = {
   {"bci",	HB_TAG('B','A','U',' ')},	/* Baoulé */
   {"bcl",	HB_TAG('B','I','K',' ')},	/* Central Bikol */
   {"bcq",	HB_TAG('B','C','H',' ')},	/* Bench */
-  {"be",	HB_TAG('B','E','L',' ')},  	/* Belarusian */
+  {"be",	HB_TAG('B','E','L',' ')},	/* Belarusian */
   {"bem",	HB_TAG('B','E','M',' ')},	/* Bemba (Zambia) */
-  {"ber",	HB_TAG('B','E','R',' ')},  	/* Berber [family] */
+  {"ber",	HB_TAG('B','E','R',' ')},	/* Berber [family] */
   {"bfq",	HB_TAG('B','A','D',' ')},	/* Badaga */
   {"bft",	HB_TAG('B','L','T',' ')},	/* Balti */
   {"bfy",	HB_TAG('B','A','G',' ')},	/* Baghelkhandi */
@@ -346,11 +351,10 @@ static const LangTag ot_languages[] = {
   {"gv",	HB_TAG('M','N','X',' ')},	/* Manx */
   {"ha",	HB_TAG('H','A','U',' ')},	/* Hausa */
   {"har",	HB_TAG('H','R','I',' ')},	/* Harari */
-  {"haw",	HB_TAG('H','A','W',' ')},  	/* Hawaiian */
-  {"hay",	HB_TAG('H','A','Y',' ')},  	/* Haya */
-  {"haz",	HB_TAG('H','A','Z',' ')},  	/* Hazaragi */
+  {"haw",	HB_TAG('H','A','W',' ')},	/* Hawaiian */
+  {"hay",	HB_TAG('H','A','Y',' ')},	/* Haya */
+  {"haz",	HB_TAG('H','A','Z',' ')},	/* Hazaragi */
   {"he",	HB_TAG('I','W','R',' ')},	/* Hebrew */
-  {"hz",	HB_TAG('H','E','R',' ')},	/* Herero */
   {"hi",	HB_TAG('H','I','N',' ')},	/* Hindi */
   {"hil",	HB_TAG('H','I','L',' ')},	/* Hiligaynon */
   {"hnd",	HB_TAG('H','N','D',' ')},	/* [Southern] Hindko */
@@ -542,6 +546,7 @@ static const LangTag ot_languages[] = {
   {"nr",	HB_TAG('N','D','B',' ')},	/* [South] Ndebele */
   {"nsk",	HB_TAG('N','A','S',' ')},	/* Naskapi */
   {"nso",	HB_TAG('S','O','T',' ')},	/* [Northern] Sotho */
+  {"nv",	HB_TAG('N','A','V',' ')},	/* Navajo */
   {"ny",	HB_TAG('C','H','I',' ')},	/* Chewa/Chichwa/Nyanja */
   {"nym",	HB_TAG('N','Y','M',' ')},	/* Nyamwezi */
   {"nyn",	HB_TAG('N','K','L',' ')},	/* Nyankole */
@@ -595,8 +600,8 @@ static const LangTag ot_languages[] = {
   {"sah",	HB_TAG('Y','A','K',' ')},	/* Yakut */
   {"sas",	HB_TAG('S','A','S',' ')},	/* Sasak */
   {"sat",	HB_TAG('S','A','T',' ')},	/* Santali */
-  {"sck",	HB_TAG('S','A','D',' ')},	/* Sadri */
   {"sc",	HB_TAG('S','R','D',' ')},	/* Sardinian [macrolanguage] */
+  {"sck",	HB_TAG('S','A','D',' ')},	/* Sadri */
   {"scn",	HB_TAG('S','C','N',' ')},	/* Sicilian */
   {"sco",	HB_TAG('S','C','O',' ')},	/* Scots */
   {"scs",	HB_TAG('S','L','A',' ')},	/* [North] Slavey */
@@ -684,8 +689,8 @@ static const LangTag ot_languages[] = {
   {"uzs",	HB_TAG('U','Z','B',' ')},	/* Southern Uzbek */
   {"ve",	HB_TAG('V','E','N',' ')},	/* Venda */
   {"vec",	HB_TAG('V','E','C',' ')},	/* Venetian */
-  {"vls",	HB_TAG('F','L','E',' ')},	/* Vlaams */
   {"vi",	HB_TAG('V','I','T',' ')},	/* Vietnamese */
+  {"vls",	HB_TAG('F','L','E',' ')},	/* Vlaams */
   {"vmw",	HB_TAG('M','A','K',' ')},	/* Makhuwa */
   {"vo",	HB_TAG('V','O','L',' ')},	/* Volapük */
   {"vro",	HB_TAG('V','R','O',' ')},	/* Võro */
@@ -694,9 +699,9 @@ static const LangTag ot_languages[] = {
   {"wbm",	HB_TAG('W','A',' ',' ')},	/* Wa */
   {"wbr",	HB_TAG('W','A','G',' ')},	/* Wagdi */
   {"wle",	HB_TAG('S','I','G',' ')},	/* Wolane */
+  {"wo",	HB_TAG('W','L','F',' ')},	/* Wolof */
   {"wry",	HB_TAG('M','A','W',' ')},	/* Merwari */
   {"wtm",	HB_TAG('W','T','M',' ')},	/* Mewati */
-  {"wo",	HB_TAG('W','L','F',' ')},	/* Wolof */
   {"xal",	HB_TAG('K','L','M',' ')},	/* Kalmyk */
   {"xh",	HB_TAG('X','H','S',' ')},	/* Xhosa */
   {"xog",	HB_TAG('X','O','G',' ')},	/* Soga */
@@ -727,7 +732,6 @@ static const LangTag ot_languages[] = {
 /*{"fuf?",	HB_TAG('F','T','A',' ')},*/	/* Futa */
 /*{"ar-Syrc?",	HB_TAG('G','A','R',' ')},*/	/* Garshuni */
 /*{"cfm/rnl?",	HB_TAG('H','A','L',' ')},*/	/* Halam */
-/*{"fonipa",	HB_TAG('I','P','P','H')},*/	/* Phonetic transcription—IPA conventions */
 /*{"ga-Latg?/Latg?",	HB_TAG('I','R','T',' ')},*/	/* Irish Traditional */
 /*{"krc",	HB_TAG('K','A','R',' ')},*/	/* Karachay */
 /*{"alw?/ktb?",	HB_TAG('K','E','B',' ')},*/	/* Kebena */
@@ -763,12 +767,18 @@ static const LangTag ot_languages[] = {
 /*{"??",	HB_TAG('Z','H','P',' ')},*/	/* Chinese Phonetic */
 };
 
-static const LangTag ot_languages_zh[] = {
+typedef struct {
+  char language[8];
+  hb_tag_t tag;
+} LangTagLong;
+static const LangTagLong ot_languages_zh[] = {
   {"zh-cn",	HB_TAG('Z','H','S',' ')},	/* Chinese (China) */
   {"zh-hk",	HB_TAG('Z','H','H',' ')},	/* Chinese (Hong Kong) */
   {"zh-mo",	HB_TAG('Z','H','T',' ')},	/* Chinese (Macao) */
   {"zh-sg",	HB_TAG('Z','H','S',' ')},	/* Chinese (Singapore) */
-  {"zh-tw",	HB_TAG('Z','H','T',' ')} 	/* Chinese (Taiwan) */
+  {"zh-tw",	HB_TAG('Z','H','T',' ')},	/* Chinese (Taiwan) */
+  {"zh-hans",	HB_TAG('Z','H','S',' ')},	/* Chinese (Simplified) */
+  {"zh-hant",	HB_TAG('Z','H','T',' ')},	/* Chinese (Traditional) */
 };
 
 static int
@@ -800,7 +810,6 @@ hb_tag_t
 hb_ot_tag_from_language (hb_language_t language)
 {
   const char *lang_str, *s;
-  const LangTag *lang_tag;
 
   if (language == HB_LANGUAGE_INVALID)
     return HB_OT_TAG_DEFAULT_LANGUAGE;
@@ -821,12 +830,23 @@ hb_ot_tag_from_language (hb_language_t language)
     }
   }
 
+  /*
+   * The International Phonetic Alphabet is a variant tag in BCP-47,
+   * which can be applied to any language.
+   */
+  if (strstr (lang_str, "-fonipa")) {
+    return HB_TAG('I','P','P','H');  /* Phonetic transcription—IPA conventions */
+  }
+
   /* Find a language matching in the first component */
-  lang_tag = (LangTag *) bsearch (lang_str, ot_languages,
-				  ARRAY_LENGTH (ot_languages), sizeof (LangTag),
-				  (hb_compare_func_t) lang_compare_first_component);
-  if (lang_tag)
-    return lang_tag->tag;
+  {
+    const LangTag *lang_tag;
+    lang_tag = (LangTag *) bsearch (lang_str, ot_languages,
+				    ARRAY_LENGTH (ot_languages), sizeof (LangTag),
+				    (hb_compare_func_t) lang_compare_first_component);
+    if (lang_tag)
+      return lang_tag->tag;
+  }
 
   /* Otherwise, check the Chinese ones */
   if (0 == lang_compare_first_component (lang_str, "zh"))
@@ -835,8 +855,9 @@ hb_ot_tag_from_language (hb_language_t language)
 
     for (i = 0; i < ARRAY_LENGTH (ot_languages_zh); i++)
     {
+      const LangTagLong *lang_tag;
       lang_tag = &ot_languages_zh[i];
-      if (lang_matches (lang_tag->language, lang_str))
+      if (lang_matches (lang_str, lang_tag->language))
 	return lang_tag->tag;
     }
 
@@ -849,12 +870,21 @@ hb_ot_tag_from_language (hb_language_t language)
     s = lang_str + strlen (lang_str);
   if (s - lang_str == 3) {
     /* Assume it's ISO-639-3 and upper-case and use it. */
-    return hb_tag_from_string (lang_str, s - lang_str) & ~0x20202000;
+    return hb_tag_from_string (lang_str, s - lang_str) & ~0x20202000u;
   }
 
   return HB_OT_TAG_DEFAULT_LANGUAGE;
 }
 
+/**
+ * hb_ot_tag_to_language:
+ *
+ * 
+ *
+ * Return value: (transfer none):
+ *
+ * Since: 0.9.2
+ **/
 hb_language_t
 hb_ot_tag_to_language (hb_tag_t tag)
 {
@@ -868,22 +898,19 @@ hb_ot_tag_to_language (hb_tag_t tag)
       return hb_language_from_string (ot_languages[i].language, -1);
 
   /* If tag starts with ZH, it's Chinese */
-  if ((tag & 0xFFFF0000)  == 0x5A480000) {
+  if ((tag & 0xFFFF0000u)  == 0x5A480000u) {
     switch (tag) {
       case HB_TAG('Z','H','H',' '): return hb_language_from_string ("zh-hk", -1); /* Hong Kong */
-      default: {
-        /* Encode the tag... */
-	unsigned char buf[14] = "zh-x-hbot";
-	buf[9] = tag >> 24;
-	buf[10] = (tag >> 16) & 0xFF;
-	buf[11] = (tag >> 8) & 0xFF;
-	buf[12] = tag & 0xFF;
-	if (buf[12] == 0x20)
-	  buf[12] = '\0';
-	buf[13] = '\0';
-	return hb_language_from_string ((char *) buf, -1);
-      }
+      case HB_TAG('Z','H','S',' '): return hb_language_from_string ("zh-Hans", -1); /* Simplified */
+      case HB_TAG('Z','H','T',' '): return hb_language_from_string ("zh-Hant", -1); /* Traditional */
+      default: break; /* Fall through */
     }
+  }
+
+  /* struct LangTag has only room for 3-letter language tags. */
+  switch (tag) {
+  case HB_TAG('I','P','P','H'):  /* Phonetic transcription—IPA conventions */
+    return hb_language_from_string ("und-fonipa", -1);
   }
 
   /* Else return a custom language in the form of "x-hbotABCD" */
@@ -900,4 +927,27 @@ hb_ot_tag_to_language (hb_tag_t tag)
   }
 }
 
+#ifdef MAIN
+static inline void
+test_langs_sorted (void)
+{
+  for (unsigned int i = 1; i < ARRAY_LENGTH (ot_languages); i++)
+  {
+    int c = lang_compare_first_component (ot_languages[i-1].language, ot_languages[i].language);
+    if (c >= 0)
+    {
+      fprintf (stderr, "ot_languages not sorted at index %d: %s %d %s\n",
+	       i, ot_languages[i-1].language, c, ot_languages[i].language);
+      abort();
+    }
+  }
+}
 
+int
+main (void)
+{
+  test_langs_sorted ();
+  return 0;
+}
+
+#endif

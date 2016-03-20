@@ -6,16 +6,21 @@
  * Tests Places views (menu, toolbar, tree) for liveupdate.
  */
 
-let toolbar = document.getElementById("PersonalToolbar");
-let wasCollapsed = toolbar.collapsed;
+var toolbar = document.getElementById("PersonalToolbar");
+var wasCollapsed = toolbar.collapsed;
 
 function test() {
-  // Uncollapse the personal toolbar if needed.
-  if (wasCollapsed)
-    setToolbarVisibility(toolbar, true);
-
   waitForExplicitFinish();
 
+  // Uncollapse the personal toolbar if needed.
+  if (wasCollapsed) {
+    promiseSetToolbarVisibility(toolbar, true).then(openBookmarksSidebar);
+  } else {
+    openBookmarksSidebar();
+  }
+}
+
+function openBookmarksSidebar() {
   // Sanity checks.
   ok(PlacesUtils, "PlacesUtils in context");
   ok(PlacesUIUtils, "PlacesUIUtils in context");
@@ -32,7 +37,7 @@ function test() {
     // Need to executeSoon since the tree is initialized on sidebar load.
     executeSoon(startTest);
   }, true);
-  toggleSidebar("viewBookmarksSidebar", true);
+  SidebarUI.show("viewBookmarksSidebar");
 }
 
 /**
@@ -44,7 +49,7 @@ function fakeOpenPopup(aPopup) {
   popupEvent.initMouseEvent("popupshowing", true, true, window, 0,
                             0, 0, 0, 0, false, false, false, false,
                             0, null);
-  aPopup.dispatchEvent(popupEvent);  
+  aPopup.dispatchEvent(popupEvent);
 }
 
 /**
@@ -166,13 +171,14 @@ function startTest() {
  */
 function finishTest() {
   // Close bookmarks sidebar.
-  toggleSidebar("viewBookmarksSidebar", false);
+  SidebarUI.hide();
 
   // Collapse the personal toolbar if needed.
-  if (wasCollapsed)
-    setToolbarVisibility(toolbar, false);
-
-  finish();
+  if (wasCollapsed) {
+    promiseSetToolbarVisibility(toolbar, false).then(finish);
+  } else {
+    finish();
+  }
 }
 
 /**
@@ -468,7 +474,7 @@ function getViewsForFolder(aFolderId) {
       break;
     case PlacesUtils.unfiledBookmarksFolderId:
       return ["sidebar"]
-      break;    
+      break;
   }
   return new Array();
 }

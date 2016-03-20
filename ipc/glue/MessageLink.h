@@ -60,7 +60,7 @@ class MessageListener
     public mozilla::SupportsWeakPtr<MessageListener>
 {
   public:
-    MOZ_DECLARE_REFCOUNTED_TYPENAME(MessageListener)
+    MOZ_DECLARE_WEAKREFERENCE_TYPENAME(MessageListener)
     typedef IPC::Message Message;
 
     virtual ~MessageListener() { }
@@ -70,11 +70,43 @@ class MessageListener
     virtual Result OnMessageReceived(const Message& aMessage) = 0;
     virtual Result OnMessageReceived(const Message& aMessage, Message *& aReply) = 0;
     virtual Result OnCallReceived(const Message& aMessage, Message *& aReply) = 0;
-    virtual void OnProcessingError(Result aError) = 0;
+    virtual void OnProcessingError(Result aError, const char* aMsgName) = 0;
     virtual void OnChannelConnected(int32_t peer_pid) {}
     virtual bool OnReplyTimeout() {
         return false;
     }
+
+    // WARNING: This function is called with the MessageChannel monitor held.
+    virtual void IntentionalCrash() {
+        MOZ_CRASH("Intentional IPDL crash");
+    }
+
+    // The code here is only useful for fuzzing. It should not be used for any
+    // other purpose.
+#ifdef DEBUG
+    // Returns true if we should simulate a timeout.
+    // WARNING: This is a testing-only function that is called with the
+    // MessageChannel monitor held. Don't do anything fancy here or we could
+    // deadlock.
+    virtual bool ArtificialTimeout() {
+        return false;
+    }
+
+    // Returns true if we want to cause the worker thread to sleep with the
+    // monitor unlocked.
+    virtual bool NeedArtificialSleep() {
+        return false;
+    }
+
+    // This function should be implemented to sleep for some amount of time on
+    // the worker thread. Will only be called if NeedArtificialSleep() returns
+    // true.
+    virtual void ArtificialSleep() {}
+#else
+    bool ArtificialTimeout() { return false; }
+    bool NeedArtificialSleep() { return false; }
+    void ArtificialSleep() {}
+#endif
 
     virtual void OnEnteredCxxStack() {
         NS_RUNTIMEABORT("default impl shouldn't be invoked");
@@ -94,6 +126,17 @@ class MessageListener
         return RIPChildWins;
     }
 
+    /**
+     * Return true if windows messages can be handled while waiting for a reply
+     * to a sync IPDL message.
+     */
+    virtual bool HandleWindowsMessages(const Message& aMsg) const { return true; }
+
+    virtual void OnEnteredSyncSend() {
+    }
+    virtual void OnExitedSyncSend() {
+    }
+
     virtual void ProcessRemoteNativeEventsInInterruptCall() {
     }
 
@@ -107,7 +150,7 @@ class MessageLink
   public:
     typedef IPC::Message Message;
 
-    MessageLink(MessageChannel *aChan);
+    explicit MessageLink(MessageChannel *aChan);
     virtual ~MessageLink();
 
     // n.b.: These methods all require that the channel monitor is
@@ -118,6 +161,12 @@ class MessageLink
 
     virtual bool Unsound_IsClosed() const = 0;
     virtual uint32_t Unsound_NumQueuedMessages() const = 0;
+
+#ifdef MOZ_NUWA_PROCESS
+    // To be overridden by ProcessLink.
+    virtual void Block() {}
+    virtual void Unblock() {}
+#endif
 
   protected:
     MessageChannel *mChan;
@@ -134,34 +183,55 @@ class ProcessLink
 
     void AssertIOThread() const
     {
-        NS_ABORT_IF_FALSE(mIOLoop == MessageLoop::current(),
-                          "not on I/O thread!");
+        MOZ_ASSERT(mIOLoop == MessageLoop::current(),
+                   "not on I/O thread!");
     }
 
   public:
-    ProcessLink(MessageChannel *chan);
+    explicit ProcessLink(MessageChannel *chan);
     virtual ~ProcessLink();
+
+    // The ProcessLink will register itself as the IPC::Channel::Listener on the
+    // transport passed here. If the transport already has a listener registered
+    // then a listener chain will be established (the ProcessLink listener
+    // methods will be called first and may call some methods on the original
+    // listener as well). Once the channel is closed (either via normal shutdown
+    // or a pipe error) the chain will be destroyed and the original listener
+    // will again be registered.
     void Open(Transport* aTransport, MessageLoop *aIOLoop, Side aSide);
     
     // Run on the I/O thread, only when using inter-process link.
     // These methods acquire the monitor and forward to the
     // similarly named methods in AsyncChannel below
     // (OnMessageReceivedFromLink(), etc)
-    virtual void OnMessageReceived(const Message& msg) MOZ_OVERRIDE;
-    virtual void OnChannelConnected(int32_t peer_pid) MOZ_OVERRIDE;
-    virtual void OnChannelError() MOZ_OVERRIDE;
+    virtual void OnMessageReceived(const Message& msg) override;
+    virtual void OnChannelConnected(int32_t peer_pid) override;
+    virtual void OnChannelError() override;
 
-    virtual void EchoMessage(Message *msg) MOZ_OVERRIDE;
-    virtual void SendMessage(Message *msg) MOZ_OVERRIDE;
-    virtual void SendClose() MOZ_OVERRIDE;
+    virtual void EchoMessage(Message *msg) override;
+    virtual void SendMessage(Message *msg) override;
+    virtual void SendClose() override;
 
-    virtual bool Unsound_IsClosed() const MOZ_OVERRIDE;
-    virtual uint32_t Unsound_NumQueuedMessages() const MOZ_OVERRIDE;
+    virtual bool Unsound_IsClosed() const override;
+    virtual uint32_t Unsound_NumQueuedMessages() const override;
+
+#ifdef MOZ_NUWA_PROCESS
+    void Block() override {
+        mIsBlocked = true;
+    }
+    void Unblock() override {
+        mIsBlocked = false;
+    }
+#endif
 
   protected:
     Transport* mTransport;
     MessageLoop* mIOLoop;       // thread where IO happens
     Transport::Listener* mExistingListener; // channel's previous listener
+#ifdef MOZ_NUWA_PROCESS
+    bool mIsToNuwaProcess;
+    bool mIsBlocked;
+#endif
 };
 
 class ThreadLink : public MessageLink
@@ -170,12 +240,12 @@ class ThreadLink : public MessageLink
     ThreadLink(MessageChannel *aChan, MessageChannel *aTargetChan);
     virtual ~ThreadLink();
 
-    virtual void EchoMessage(Message *msg) MOZ_OVERRIDE;
-    virtual void SendMessage(Message *msg) MOZ_OVERRIDE;
-    virtual void SendClose() MOZ_OVERRIDE;
+    virtual void EchoMessage(Message *msg) override;
+    virtual void SendMessage(Message *msg) override;
+    virtual void SendClose() override;
 
-    virtual bool Unsound_IsClosed() const MOZ_OVERRIDE;
-    virtual uint32_t Unsound_NumQueuedMessages() const MOZ_OVERRIDE;
+    virtual bool Unsound_IsClosed() const override;
+    virtual uint32_t Unsound_NumQueuedMessages() const override;
 
   protected:
     MessageChannel* mTargetChan;

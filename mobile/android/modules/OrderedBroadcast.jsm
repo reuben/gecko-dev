@@ -12,7 +12,7 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Messaging.jsm");
 
-let _callbackId = 1;
+var _callbackId = 1;
 
 /**
  * Send an ordered broadcast to Java.
@@ -70,7 +70,7 @@ function sendOrderedBroadcast(action, token, callback, permission) {
 
   Services.obs.addObserver(observer, responseEvent, false);
 
-  sendMessageToJava({
+  Messaging.sendRequest({
     type: "OrderedBroadcast:Send",
     action: action,
     responseEvent: responseEvent,

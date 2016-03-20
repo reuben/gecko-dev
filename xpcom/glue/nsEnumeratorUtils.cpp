@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,6 +12,7 @@
 #include "nsIStringEnumerator.h"
 
 #include "nsCOMPtr.h"
+#include "mozilla/RefPtr.h"
 
 class EmptyEnumeratorImpl
   : public nsISimpleEnumerator
@@ -28,7 +30,7 @@ public:
   NS_DECL_NSIUTF8STRINGENUMERATOR
   // can't use NS_DECL_NSISTRINGENUMERATOR because they share the
   // HasMore() signature
-  NS_IMETHOD GetNext(nsAString& aResult);
+  NS_IMETHOD GetNext(nsAString& aResult) override;
 
   static EmptyEnumeratorImpl* GetInstance()
   {
@@ -95,35 +97,33 @@ NS_NewEmptyEnumerator(nsISimpleEnumerator** aResult)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-class nsSingletonEnumerator MOZ_FINAL : public nsISimpleEnumerator
+class nsSingletonEnumerator final : public nsISimpleEnumerator
 {
 public:
   NS_DECL_ISUPPORTS
 
   // nsISimpleEnumerator methods
-  NS_IMETHOD HasMoreElements(bool* aResult);
-  NS_IMETHOD GetNext(nsISupports** aResult);
+  NS_IMETHOD HasMoreElements(bool* aResult) override;
+  NS_IMETHOD GetNext(nsISupports** aResult) override;
 
-  nsSingletonEnumerator(nsISupports* aValue);
+  explicit nsSingletonEnumerator(nsISupports* aValue);
 
 private:
   ~nsSingletonEnumerator();
 
 protected:
-  nsISupports* mValue;
+  nsCOMPtr<nsISupports> mValue;
   bool mConsumed;
 };
 
 nsSingletonEnumerator::nsSingletonEnumerator(nsISupports* aValue)
   : mValue(aValue)
 {
-  NS_IF_ADDREF(mValue);
   mConsumed = (mValue ? false : true);
 }
 
 nsSingletonEnumerator::~nsSingletonEnumerator()
 {
-  NS_IF_RELEASE(mValue);
 }
 
 NS_IMPL_ISUPPORTS(nsSingletonEnumerator, nsISimpleEnumerator)
@@ -164,25 +164,21 @@ nsresult
 NS_NewSingletonEnumerator(nsISimpleEnumerator** aResult,
                           nsISupports* aSingleton)
 {
-  nsSingletonEnumerator* enumer = new nsSingletonEnumerator(aSingleton);
-  if (!enumer) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-  *aResult = enumer;
-  NS_ADDREF(*aResult);
+  RefPtr<nsSingletonEnumerator> enumer = new nsSingletonEnumerator(aSingleton);
+  enumer.forget(aResult);
   return NS_OK;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-class nsUnionEnumerator MOZ_FINAL : public nsISimpleEnumerator
+class nsUnionEnumerator final : public nsISimpleEnumerator
 {
 public:
   NS_DECL_ISUPPORTS
 
   // nsISimpleEnumerator methods
-  NS_IMETHOD HasMoreElements(bool* aResult);
-  NS_IMETHOD GetNext(nsISupports** aResult);
+  NS_IMETHOD HasMoreElements(bool* aResult) override;
+  NS_IMETHOD GetNext(nsISupports** aResult) override;
 
   nsUnionEnumerator(nsISimpleEnumerator* aFirstEnumerator,
                     nsISimpleEnumerator* aSecondEnumerator);
@@ -226,7 +222,7 @@ nsUnionEnumerator::HasMoreElements(bool* aResult)
     return NS_OK;
   }
 
-  if (! mAtSecond) {
+  if (!mAtSecond) {
     rv = mFirstEnumerator->HasMoreElements(aResult);
     if (NS_FAILED(rv)) {
       return rv;
@@ -265,7 +261,7 @@ nsUnionEnumerator::GetNext(nsISupports** aResult)
     return NS_ERROR_UNEXPECTED;
   }
 
-  if (! mAtSecond) {
+  if (!mAtSecond) {
     return mFirstEnumerator->GetNext(aResult);
   }
 
@@ -278,9 +274,9 @@ NS_NewUnionEnumerator(nsISimpleEnumerator** aResult,
                       nsISimpleEnumerator* aSecondEnumerator)
 {
   *aResult = nullptr;
-  if (! aFirstEnumerator) {
+  if (!aFirstEnumerator) {
     *aResult = aSecondEnumerator;
-  } else if (! aSecondEnumerator) {
+  } else if (!aSecondEnumerator) {
     *aResult = aFirstEnumerator;
   } else {
     nsUnionEnumerator* enumer = new nsUnionEnumerator(aFirstEnumerator,

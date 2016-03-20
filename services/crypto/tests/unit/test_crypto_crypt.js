@@ -1,6 +1,6 @@
 Cu.import("resource://services-crypto/WeaveCrypto.js");
 
-let cryptoSvc = new WeaveCrypto();
+var cryptoSvc = new WeaveCrypto();
 
 function run_test() {
   
@@ -38,7 +38,7 @@ function test_key_memoization() {
   do_check_eq(c, 0);
   let cipherText = cryptoSvc.encrypt("Hello, world.", key, iv);
   do_check_eq(c, 1);
-  let cipherText = cryptoSvc.encrypt("Hello, world.", key, iv);
+  cipherText = cryptoSvc.encrypt("Hello, world.", key, iv);
   do_check_eq(c, 1);
 
   // ... as should decryption.

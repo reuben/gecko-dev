@@ -8,14 +8,16 @@ SOURCES += [
     'nsI18nModule.cpp',
 ]
 
-LIBRARY_NAME = 'i18n'
-
 FINAL_LIBRARY = 'xul'
+CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']
+LOCAL_INCLUDES += CONFIG['MOZ_ICU_INCLUDES']
 LOCAL_INCLUDES += [
-    '../locale/src',
-    '../lwbrk/src',
-    '../strres/src',
-    '../uconv/src',
-    '../unicharutil/src',
+    '../locale',
+    '../lwbrk',
+    '../strres',
+    '../uconv',
+    '../unicharutil',
 ]
 
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wshadow']

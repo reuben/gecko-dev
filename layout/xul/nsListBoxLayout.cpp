@@ -38,7 +38,7 @@ nsListBoxLayout::GetPrefSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState)
     }
     if (nsContentUtils::HasNonEmptyAttr(frame->GetContent(), kNameSpaceID_None,
                                         nsGkAtoms::sizemode)) {
-      nscoord width = frame->ComputeIntrinsicWidth(aBoxLayoutState);
+      nscoord width = frame->ComputeIntrinsicISize(aBoxLayoutState);
       if (width > pref.width)
         pref.width = width;
     }
@@ -64,7 +64,7 @@ nsListBoxLayout::GetMinSize(nsIFrame* aBox, nsBoxLayoutState& aBoxLayoutState)
     }
     if (nsContentUtils::HasNonEmptyAttr(frame->GetContent(), kNameSpaceID_None,
                                         nsGkAtoms::sizemode)) {
-      nscoord width = frame->ComputeIntrinsicWidth(aBoxLayoutState);
+      nscoord width = frame->ComputeIntrinsicISize(aBoxLayoutState);
       if (width > minSize.width)
         minSize.width = width;
     }
@@ -207,6 +207,6 @@ nsListBoxLayout::LayoutInternal(nsIFrame* aBox, nsBoxLayoutState& aState)
 
 already_AddRefed<nsBoxLayout> NS_NewListBoxLayout()
 {
-  nsRefPtr<nsBoxLayout> layout = new nsListBoxLayout();
+  RefPtr<nsBoxLayout> layout = new nsListBoxLayout();
   return layout.forget();
 } 

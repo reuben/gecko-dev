@@ -18,12 +18,11 @@
 
 #include "mozilla/Atomics.h"
 
-class nsDiskCacheInputStream;
 class nsDiskCacheDevice;
 
 class nsDiskCacheStreamIO : public nsIOutputStream {
 public:
-    nsDiskCacheStreamIO(nsDiskCacheBinding *   binding);
+    explicit nsDiskCacheStreamIO(nsDiskCacheBinding *   binding);
     
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIOUTPUTSTREAM

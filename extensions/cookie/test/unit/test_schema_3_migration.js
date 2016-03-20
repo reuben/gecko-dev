@@ -4,7 +4,7 @@
 // Test cookie database migration from version 3 (prerelease Gecko 2.0) to the
 // current version, presently 4 (Gecko 2.0).
 
-let test_generator = do_run_test();
+var test_generator = do_run_test();
 
 function run_test() {
   do_test_pending();
@@ -116,8 +116,8 @@ function do_run_test() {
 
   // Test the expected set of cookies.
   do_check_eq(Services.cookiemgr.countCookiesFromHost("cat.com"), 20);
-  let enumerator = Services.cookiemgr.getCookiesFromHost("cat.com");
-  let cookie = enumerator.getNext().QueryInterface(Ci.nsICookie2);
+  enumerator = Services.cookiemgr.getCookiesFromHost("cat.com");
+  cookie = enumerator.getNext().QueryInterface(Ci.nsICookie2);
   do_check_eq(cookie.creationTime, 0);
 
   finish_test();

@@ -4,8 +4,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-interface File;
-
 /*
  * All functions on Directory that accept DOMString arguments for file or
  * directory names only allow relative path to current directory itself. The
@@ -13,8 +11,11 @@ interface File;
  * segment of ".." or ".". So the paths aren't allowed to walk up the directory
  * tree. For example, paths like "../foo", "..", "/foo/bar" or "foo/../bar" are
  * not allowed.
+ *
+ * http://w3c.github.io/filesystem-api/#idl-def-Directory
+ * https://microsoftedge.github.io/directory-upload/proposal.html#directory-interface
  */
-[NoInterfaceObject]
+[Exposed=Window]
 interface Directory {
   /*
    * The leaf name of the directory.
@@ -37,9 +38,8 @@ interface Directory {
    * @return If succeeds, the promise is resolved with the new created
    * File object. Otherwise, rejected with a DOM error.
    */
-  [NewObject]
-  // Promise<File>
-  Promise createFile(DOMString path, optional CreateFileOptions options);
+  [Pref="device.storage.enabled", NewObject]
+  Promise<File> createFile(DOMString path, optional CreateFileOptions options);
 
   /*
    * Creates a descendent directory. This method will create any intermediate
@@ -50,9 +50,8 @@ interface Directory {
    * @return If succeeds, the promise is resolved with the new created
    * Directory object. Otherwise, rejected with a DOM error.
    */
-  [NewObject]
-  // Promise<Directory>
-  Promise createDirectory(DOMString path);
+  [Pref="device.storage.enabled", NewObject]
+  Promise<Directory> createDirectory(DOMString path);
 
   /*
    * Gets a descendent file or directory with the given path.
@@ -62,9 +61,8 @@ interface Directory {
    * with a File or Directory object, depending on the entry's type. Otherwise,
    * rejected with a DOM error.
    */
-  [NewObject]
-  // Promise<(File or Directory)>
-  Promise get(DOMString path);
+  [Pref="device.storage.enabled", NewObject]
+  Promise<(File or Directory)> get(DOMString path);
 
   /*
    * Deletes a file or an empty directory. The target must be a descendent of
@@ -77,9 +75,8 @@ interface Directory {
    * exist, the promise is resolved with boolean false. If the target did exist
    * and was successfully deleted, the promise is resolved with boolean true.
    */
-  [NewObject]
-  // Promise<boolean>
-  Promise remove((DOMString or File or Directory) path);
+  [Pref="device.storage.enabled", NewObject]
+  Promise<boolean> remove((DOMString or File or Directory) path);
 
   /*
    * Deletes a file or a directory recursively. The target should be a
@@ -92,9 +89,28 @@ interface Directory {
    * resolved with boolean false. If the target did exist and was successfully
    * deleted, the promise is resolved with boolean true.
    */
-  [NewObject]
-  // Promise<boolean>
-  Promise removeDeep((DOMString or File or Directory) path);
+  [Pref="device.storage.enabled", NewObject]
+  Promise<boolean> removeDeep((DOMString or File or Directory) path);
+};
+
+[Exposed=Window]
+partial interface Directory {
+  // Already defined in the main interface declaration:
+  //readonly attribute DOMString name;
+
+  /*
+   * The path of the Directory (includes both its basename and leafname).
+   * The path begins with the name of the ancestor Directory that was
+   * originally exposed to content (say via a directory picker) and traversed
+   * to obtain this Directory.  Full filesystem paths are not exposed to
+   * unprivilaged content.
+   */
+  readonly attribute DOMString path;
+
+  /*
+   * Getter for the immediate children of this directory.
+   */
+  Promise<sequence<(File or Directory)>> getFilesAndDirectories();
 };
 
 enum CreateIfExistsMode { "replace", "fail" };

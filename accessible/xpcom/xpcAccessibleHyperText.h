@@ -11,26 +11,49 @@
 #include "nsIAccessibleHyperText.h"
 #include "nsIAccessibleEditableText.h"
 
+#include "HyperTextAccessible.h"
+#include "xpcAccessibleGeneric.h"
+
 namespace mozilla {
 namespace a11y {
 
-class xpcAccessibleHyperText : public nsIAccessibleText,
+class xpcAccessibleHyperText : public xpcAccessibleGeneric,
+                               public nsIAccessibleText,
                                public nsIAccessibleEditableText,
                                public nsIAccessibleHyperText
 {
 public:
-  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr);
+  explicit xpcAccessibleHyperText(Accessible* aIntl) :
+    xpcAccessibleGeneric(aIntl)
+  {
+    if (aIntl->IsHyperText() && aIntl->AsHyperText()->IsTextRole())
+      mSupportedIfaces |= eText;
+  }
+
+  xpcAccessibleHyperText(ProxyAccessible* aProxy, uint32_t aInterfaces) :
+    xpcAccessibleGeneric(aProxy, aInterfaces) { mSupportedIfaces |= eText; }
+
+  NS_DECL_ISUPPORTS_INHERITED
 
   NS_DECL_NSIACCESSIBLETEXT
   NS_DECL_NSIACCESSIBLEHYPERTEXT
   NS_DECL_NSIACCESSIBLEEDITABLETEXT
 
-private:
-  xpcAccessibleHyperText() { }
-  friend class HyperTextAccessible;
+protected:
+  virtual ~xpcAccessibleHyperText() {}
 
-  xpcAccessibleHyperText(const xpcAccessibleHyperText&) MOZ_DELETE;
-  xpcAccessibleHyperText& operator =(const xpcAccessibleHyperText&) MOZ_DELETE;
+private:
+  HyperTextAccessible* Intl()
+  {
+    if (Accessible* acc = mIntl.AsAccessible()) {
+      return acc->AsHyperText();
+    }
+
+    return nullptr;
+  }
+
+  xpcAccessibleHyperText(const xpcAccessibleHyperText&) = delete;
+  xpcAccessibleHyperText& operator =(const xpcAccessibleHyperText&) = delete;
 };
 
 } // namespace a11y

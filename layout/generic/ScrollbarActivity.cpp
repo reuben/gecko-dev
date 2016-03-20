@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ScrollbarActivity.h"
-#include "nsIScrollbarOwner.h"
+#include "nsIScrollbarMediator.h"
 #include "nsIContent.h"
 #include "nsIDOMEvent.h"
 #include "nsIDOMElementCSSInlineStyle.h"
@@ -363,7 +363,11 @@ SetOpacityOnElement(nsIContent* aContent, double aOpacity)
 bool
 ScrollbarActivity::UpdateOpacity(TimeStamp aTime)
 {
-  double progress = (aTime - mFadeBeginTime) / FadeDuration();
+  // Avoid division by zero if mScrollbarFadeDuration is zero, just jump
+  // to the end of the fade animation
+  double progress = mScrollbarFadeDuration
+    ? ((aTime - mFadeBeginTime) / FadeDuration())
+    : 1.0;
   double opacity = 1.0 - std::max(0.0, std::min(1.0, progress));
 
   // 'this' may be getting destroyed during SetOpacityOnElement calls.
@@ -426,9 +430,9 @@ ScrollbarActivity::StartFadeBeginTimer()
   if (!mFadeBeginTimer) {
     mFadeBeginTimer = do_CreateInstance("@mozilla.org/timer;1");
   }
-  mFadeBeginTimer->InitWithFuncCallback(FadeBeginTimerFired, this,
-                                        mScrollbarFadeBeginDelay,
-                                        nsITimer::TYPE_ONE_SHOT);
+  mFadeBeginTimer->InitWithNamedFuncCallback(
+    FadeBeginTimerFired, this, mScrollbarFadeBeginDelay,
+    nsITimer::TYPE_ONE_SHOT, "ScrollbarActivity::FadeBeginTimerFired");
 }
 
 void

@@ -19,11 +19,12 @@
 #include "nsAutoPtr.h"
 #include "nsNativeCharsetUtils.h"
 #include "nsIWindowsRegKey.h"
+#include "mozilla/UniquePtrExtensions.h"
 
 // shellapi.h is needed to build with WIN32_LEAN_AND_MEAN
 #include <shellapi.h>
 
-#define LOG(args) PR_LOG(mLog, PR_LOG_DEBUG, args)
+#define LOG(args) MOZ_LOG(mLog, mozilla::LogLevel::Debug, args)
 
 // helper methods: forward declarations...
 static nsresult GetExtensionFrom4xRegistryInfo(const nsACString& aMimeType, 
@@ -352,14 +353,14 @@ static void StripRundll32(nsString& aCommandString)
   if (bufLength == 0) // Error
     return false;
 
-  nsAutoArrayPtr<wchar_t> destination(new wchar_t[bufLength]);
+  auto destination = mozilla::MakeUniqueFallible<wchar_t[]>(bufLength);
   if (!destination)
     return false;
-  if (!::ExpandEnvironmentStringsW(handlerCommand.get(), destination,
+  if (!::ExpandEnvironmentStringsW(handlerCommand.get(), destination.get(),
                                    bufLength))
     return false;
 
-  handlerCommand = static_cast<const wchar_t*>(destination);
+  handlerCommand.Assign(destination.get());
 
   // Remove quotes around paths
   handlerCommand.StripChars("\"");
@@ -529,7 +530,7 @@ already_AddRefed<nsMIMEInfoWin> nsOSHelperAppService::GetByExtension(const nsAFl
     LossyAppendUTF16toASCII(temp, typeToUse);
   }
 
-  nsRefPtr<nsMIMEInfoWin> mimeInfo = new nsMIMEInfoWin(typeToUse);
+  RefPtr<nsMIMEInfoWin> mimeInfo = new nsMIMEInfoWin(typeToUse);
 
   // don't append the '.'
   mimeInfo->AppendExtension(NS_ConvertUTF16toUTF8(Substring(fileExtToUse, 1)));
@@ -615,7 +616,7 @@ already_AddRefed<nsIMIMEInfo> nsOSHelperAppService::GetMIMEInfoFromOS(const nsAC
     }
   }
   // If we found an extension for the type, do the lookup
-  nsRefPtr<nsMIMEInfoWin> mi;
+  RefPtr<nsMIMEInfoWin> mi;
   if (!fileExtension.IsEmpty())
     mi = GetByExtension(fileExtension, flatType.get());
   LOG(("Extension lookup on '%s' found: 0x%p\n", fileExtension.get(), mi.get()));
@@ -638,7 +639,7 @@ already_AddRefed<nsIMIMEInfo> nsOSHelperAppService::GetMIMEInfoFromOS(const nsAC
     }
   }
   if (!mi || !hasDefault) {
-    nsRefPtr<nsMIMEInfoWin> miByExt =
+    RefPtr<nsMIMEInfoWin> miByExt =
       GetByExtension(NS_ConvertUTF8toUTF16(aFileExt), flatType.get());
     LOG(("Ext. lookup for '%s' found 0x%p\n", flatExt.get(), miByExt.get()));
     if (!miByExt && mi)

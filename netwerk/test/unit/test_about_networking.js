@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Cu.import("resource://testing-common/httpd.js");
+Cu.import("resource://gre/modules/NetUtil.jsm");
 
 const gDashboard = Cc['@mozilla.org/network/dashboard;1']
   .getService(Ci.nsIDashboard);
@@ -84,9 +85,9 @@ function run_test() {
 
   let uri = ioService.newURI("http://localhost:" + gHttpServer.identity.primaryPort,
                              null, null);
-  let channel = ioService.newChannelFromURI(uri);
+  let channel = NetUtil.newChannel({uri: uri, loadUsingSystemPrincipal: true});
 
-  channel.open();
+  channel.open2();
 
   gServerSocket.init(-1, true, -1);
 

@@ -8,6 +8,7 @@
 #define DOM_CAMERA_DOMCAMERAMANAGER_H
 
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/Promise.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsIObserver.h"
@@ -18,24 +19,20 @@
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
 
-class nsPIDOMWindow;
+class nsPIDOMWindowInner;
 
 namespace mozilla {
   class ErrorResult;
   class nsDOMCameraControl;
   namespace dom {
     struct CameraConfiguration;
-    class GetCameraCallback;
-    class CameraErrorCallback;
-  }
-}
+  } // namespace dom
+} // namespace mozilla
 
-typedef nsTArray<nsRefPtr<mozilla::nsDOMCameraControl> > CameraControls;
+typedef nsTArray<nsWeakPtr> CameraControls;
 typedef nsClassHashtable<nsUint64HashKey, CameraControls> WindowTable;
-typedef mozilla::dom::Optional<mozilla::dom::OwningNonNull<mozilla::dom::CameraErrorCallback>>
-          OptionalNonNullCameraErrorCallback;
 
-class nsDOMCameraManager MOZ_FINAL
+class nsDOMCameraManager final
   : public nsIObserver
   , public nsSupportsWeakReference
   , public nsWrapperCache
@@ -53,9 +50,9 @@ public:
   // Great Renaming proposed in bug 983177.
   static bool HasSupport(JSContext* aCx, JSObject* aGlobal);
 
-  static bool CheckPermission(nsPIDOMWindow* aWindow);
+  static bool CheckPermission(nsPIDOMWindowInner* aWindow);
   static already_AddRefed<nsDOMCameraManager>
-    CreateInstance(nsPIDOMWindow* aWindow);
+    CreateInstance(nsPIDOMWindowInner* aWindow);
   static bool IsWindowStillActive(uint64_t aWindowId);
 
   void Register(mozilla::nsDOMCameraControl* aDOMCameraControl);
@@ -63,25 +60,25 @@ public:
 
   void PermissionAllowed(uint32_t aCameraId,
                          const mozilla::dom::CameraConfiguration& aOptions,
-                         mozilla::dom::GetCameraCallback* aOnSuccess,
-                         mozilla::dom::CameraErrorCallback* aOnError);
+                         mozilla::dom::Promise* aPromise);
 
   void PermissionCancelled(uint32_t aCameraId,
                            const mozilla::dom::CameraConfiguration& aOptions,
-                           mozilla::dom::GetCameraCallback* aOnSuccess,
-                           mozilla::dom::CameraErrorCallback* aOnError);
+                           mozilla::dom::Promise* aPromise);
 
   // WebIDL
-  void GetCamera(const nsAString& aCamera,
-                 const mozilla::dom::CameraConfiguration& aOptions,
-                 mozilla::dom::GetCameraCallback& aOnSuccess,
-                 const OptionalNonNullCameraErrorCallback& aOnError,
-                 mozilla::ErrorResult& aRv);
+  already_AddRefed<mozilla::dom::Promise>
+  GetCamera(const nsAString& aCamera,
+            const mozilla::dom::CameraConfiguration& aOptions,
+            mozilla::ErrorResult& aRv);
   void GetListOfCameras(nsTArray<nsString>& aList, mozilla::ErrorResult& aRv);
 
-  nsPIDOMWindow* GetParentObject() const { return mWindow; }
-  virtual JSObject* WrapObject(JSContext* aCx)
-    MOZ_OVERRIDE;
+  nsPIDOMWindowInner* GetParentObject() const { return mWindow; }
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+
+#ifdef MOZ_WIDGET_GONK
+  static void PreinitCameraHardware();
+#endif
 
 protected:
   void XpComShutdown();
@@ -89,15 +86,15 @@ protected:
   ~nsDOMCameraManager();
 
 private:
-  nsDOMCameraManager() MOZ_DELETE;
-  nsDOMCameraManager(nsPIDOMWindow* aWindow);
-  nsDOMCameraManager(const nsDOMCameraManager&) MOZ_DELETE;
-  nsDOMCameraManager& operator=(const nsDOMCameraManager&) MOZ_DELETE;
+  nsDOMCameraManager() = delete;
+  explicit nsDOMCameraManager(nsPIDOMWindowInner* aWindow);
+  nsDOMCameraManager(const nsDOMCameraManager&) = delete;
+  nsDOMCameraManager& operator=(const nsDOMCameraManager&) = delete;
 
 protected:
   uint64_t mWindowId;
   uint32_t mPermission;
-  nsCOMPtr<nsPIDOMWindow> mWindow;
+  nsCOMPtr<nsPIDOMWindowInner> mWindow;
   /**
    * 'sActiveWindows' is only ever accessed while in the Main Thread,
    * so it is not otherwise protected.

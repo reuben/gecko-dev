@@ -19,6 +19,11 @@ XULAlertAccessible::
   XULAlertAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   AccessibleWrap(aContent, aDoc)
 {
+  mGenericTypes |= eAlert;
+}
+
+XULAlertAccessible::~XULAlertAccessible()
+{
 }
 
 NS_IMPL_ISUPPORTS_INHERITED0(XULAlertAccessible, Accessible)

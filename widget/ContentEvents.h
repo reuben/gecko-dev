@@ -26,7 +26,7 @@ namespace mozilla {
 class InternalScrollPortEvent : public WidgetGUIEvent
 {
 public:
-  virtual InternalScrollPortEvent* AsScrollPortEvent() MOZ_OVERRIDE
+  virtual InternalScrollPortEvent* AsScrollPortEvent() override
   {
     return this;
   }
@@ -38,20 +38,20 @@ public:
     both       = 2
   };
 
-  InternalScrollPortEvent(bool aIsTrusted, uint32_t aMessage,
-                          nsIWidget* aWidget) :
-    WidgetGUIEvent(aIsTrusted, aMessage, aWidget, NS_SCROLLPORT_EVENT),
-    orient(vertical)
+  InternalScrollPortEvent(bool aIsTrusted, EventMessage aMessage,
+                          nsIWidget* aWidget)
+    : WidgetGUIEvent(aIsTrusted, aMessage, aWidget, eScrollPortEventClass)
+    , orient(vertical)
   {
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_SCROLLPORT_EVENT,
+    MOZ_ASSERT(mClass == eScrollPortEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
     InternalScrollPortEvent* result =
-      new InternalScrollPortEvent(false, message, nullptr);
+      new InternalScrollPortEvent(false, mMessage, nullptr);
     result->AssignScrollPortEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -75,24 +75,24 @@ public:
 class InternalScrollAreaEvent : public WidgetGUIEvent
 {
 public:
-  virtual InternalScrollAreaEvent* AsScrollAreaEvent() MOZ_OVERRIDE
+  virtual InternalScrollAreaEvent* AsScrollAreaEvent() override
   {
     return this;
   }
 
-  InternalScrollAreaEvent(bool aIsTrusted, uint32_t aMessage,
-                          nsIWidget* aWidget) :
-    WidgetGUIEvent(aIsTrusted, aMessage, aWidget, NS_SCROLLAREA_EVENT)
+  InternalScrollAreaEvent(bool aIsTrusted, EventMessage aMessage,
+                          nsIWidget* aWidget)
+    : WidgetGUIEvent(aIsTrusted, aMessage, aWidget, eScrollAreaEventClass)
   {
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_SCROLLAREA_EVENT,
+    MOZ_ASSERT(mClass == eScrollAreaEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
     InternalScrollAreaEvent* result =
-      new InternalScrollAreaEvent(false, message, nullptr);
+      new InternalScrollAreaEvent(false, mMessage, nullptr);
     result->AssignScrollAreaEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -119,19 +119,19 @@ public:
 class InternalFormEvent : public WidgetEvent
 {
 public:
-  virtual InternalFormEvent* AsFormEvent() MOZ_OVERRIDE { return this; }
+  virtual InternalFormEvent* AsFormEvent() override { return this; }
 
-  InternalFormEvent(bool aIsTrusted, uint32_t aMessage) :
-    WidgetEvent(aIsTrusted, aMessage, NS_FORM_EVENT),
-    originator(nullptr)
+  InternalFormEvent(bool aIsTrusted, EventMessage aMessage)
+    : WidgetEvent(aIsTrusted, aMessage, eFormEventClass)
+    , originator(nullptr)
   {
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_FORM_EVENT,
+    MOZ_ASSERT(mClass == eFormEventClass,
                "Duplicate() must be overridden by sub class");
-    InternalFormEvent* result = new InternalFormEvent(false, message);
+    InternalFormEvent* result = new InternalFormEvent(false, mMessage);
     result->AssignFormEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -154,21 +154,22 @@ public:
 class InternalClipboardEvent : public WidgetEvent
 {
 public:
-  virtual InternalClipboardEvent* AsClipboardEvent() MOZ_OVERRIDE
+  virtual InternalClipboardEvent* AsClipboardEvent() override
   {
     return this;
   }
 
-  InternalClipboardEvent(bool aIsTrusted, uint32_t aMessage) :
-    WidgetEvent(aIsTrusted, aMessage, NS_CLIPBOARD_EVENT)
+  InternalClipboardEvent(bool aIsTrusted, EventMessage aMessage)
+    : WidgetEvent(aIsTrusted, aMessage, eClipboardEventClass)
   {
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_CLIPBOARD_EVENT,
+    MOZ_ASSERT(mClass == eClipboardEventClass,
                "Duplicate() must be overridden by sub class");
-    InternalClipboardEvent* result = new InternalClipboardEvent(false, message);
+    InternalClipboardEvent* result =
+      new InternalClipboardEvent(false, mMessage);
     result->AssignClipboardEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -192,19 +193,20 @@ public:
 class InternalFocusEvent : public InternalUIEvent
 {
 public:
-  virtual InternalFocusEvent* AsFocusEvent() MOZ_OVERRIDE { return this; }
+  virtual InternalFocusEvent* AsFocusEvent() override { return this; }
 
-  InternalFocusEvent(bool aIsTrusted, uint32_t aMessage) :
-    InternalUIEvent(aIsTrusted, aMessage, NS_FOCUS_EVENT),
-    fromRaise(false), isRefocus(false)
+  InternalFocusEvent(bool aIsTrusted, EventMessage aMessage)
+    : InternalUIEvent(aIsTrusted, aMessage, eFocusEventClass)
+    , fromRaise(false)
+    , isRefocus(false)
   {
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_FOCUS_EVENT,
+    MOZ_ASSERT(mClass == eFocusEventClass,
                "Duplicate() must be overridden by sub class");
-    InternalFocusEvent* result = new InternalFocusEvent(false, message);
+    InternalFocusEvent* result = new InternalFocusEvent(false, mMessage);
     result->AssignFocusEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -233,24 +235,24 @@ public:
 class InternalTransitionEvent : public WidgetEvent
 {
 public:
-  virtual InternalTransitionEvent* AsTransitionEvent() MOZ_OVERRIDE
+  virtual InternalTransitionEvent* AsTransitionEvent() override
   {
     return this;
   }
 
-  InternalTransitionEvent(bool aIsTrusted, uint32_t aMessage)
-    : WidgetEvent(aIsTrusted, aMessage, NS_TRANSITION_EVENT)
+  InternalTransitionEvent(bool aIsTrusted, EventMessage aMessage)
+    : WidgetEvent(aIsTrusted, aMessage, eTransitionEventClass)
     , elapsedTime(0.0)
   {
     mFlags.mCancelable = false;
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_TRANSITION_EVENT,
+    MOZ_ASSERT(mClass == eTransitionEventClass,
                "Duplicate() must be overridden by sub class");
     InternalTransitionEvent* result =
-      new InternalTransitionEvent(false, message);
+      new InternalTransitionEvent(false, mMessage);
     result->AssignTransitionEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -278,23 +280,24 @@ public:
 class InternalAnimationEvent : public WidgetEvent
 {
 public:
-  virtual InternalAnimationEvent* AsAnimationEvent() MOZ_OVERRIDE
+  virtual InternalAnimationEvent* AsAnimationEvent() override
   {
     return this;
   }
 
-  InternalAnimationEvent(bool aIsTrusted, uint32_t aMessage)
-    : WidgetEvent(aIsTrusted, aMessage, NS_ANIMATION_EVENT)
+  InternalAnimationEvent(bool aIsTrusted, EventMessage aMessage)
+    : WidgetEvent(aIsTrusted, aMessage, eAnimationEventClass)
     , elapsedTime(0.0)
   {
     mFlags.mCancelable = false;
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_ANIMATION_EVENT,
+    MOZ_ASSERT(mClass == eAnimationEventClass,
                "Duplicate() must be overridden by sub class");
-    InternalAnimationEvent* result = new InternalAnimationEvent(false, message);
+    InternalAnimationEvent* result =
+      new InternalAnimationEvent(false, mMessage);
     result->AssignAnimationEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -314,6 +317,76 @@ public:
     pseudoElement = aEvent.pseudoElement;
   }
 };
+
+/******************************************************************************
+ * mozilla::InternalSVGZoomEvent
+ ******************************************************************************/
+
+class InternalSVGZoomEvent : public WidgetGUIEvent
+{
+public:
+  virtual InternalSVGZoomEvent* AsSVGZoomEvent() override { return this; }
+
+  InternalSVGZoomEvent(bool aIsTrusted, EventMessage aMessage)
+    : WidgetGUIEvent(aIsTrusted, aMessage, nullptr, eSVGZoomEventClass)
+  {
+    mFlags.mCancelable = false;
+  }
+
+  virtual WidgetEvent* Duplicate() const override
+  {
+    MOZ_ASSERT(mClass == eSVGZoomEventClass,
+               "Duplicate() must be overridden by sub class");
+    // Not copying widget, it is a weak reference.
+    InternalSVGZoomEvent* result = new InternalSVGZoomEvent(false, mMessage);
+    result->AssignSVGZoomEventData(*this, true);
+    result->mFlags = mFlags;
+    return result;
+  }
+
+  void AssignSVGZoomEventData(const InternalSVGZoomEvent& aEvent,
+                              bool aCopyTargets)
+  {
+    AssignGUIEventData(aEvent, aCopyTargets);
+  }
+};
+
+/******************************************************************************
+ * mozilla::InternalSMILTimeEvent
+ ******************************************************************************/
+
+class InternalSMILTimeEvent : public InternalUIEvent
+{
+public:
+  virtual InternalSMILTimeEvent* AsSMILTimeEvent() override
+  {
+    return this;
+  }
+
+  InternalSMILTimeEvent(bool aIsTrusted, EventMessage aMessage)
+    : InternalUIEvent(aIsTrusted, aMessage, eSMILTimeEventClass)
+  {
+    mFlags.mBubbles = false;
+    mFlags.mCancelable = false;
+  }
+
+  virtual WidgetEvent* Duplicate() const override
+  {
+    MOZ_ASSERT(mClass == eSMILTimeEventClass,
+               "Duplicate() must be overridden by sub class");
+    InternalSMILTimeEvent* result = new InternalSMILTimeEvent(false, mMessage);
+    result->AssignSMILTimeEventData(*this, true);
+    result->mFlags = mFlags;
+    return result;
+  }
+
+  void AssignSMILTimeEventData(const InternalSMILTimeEvent& aEvent,
+                               bool aCopyTargets)
+  {
+    AssignUIEventData(aEvent, aCopyTargets);
+  }
+};
+
 
 } // namespace mozilla
 

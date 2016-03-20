@@ -28,7 +28,6 @@
 #include "nsString.h"
 #include "nsEscape.h"
 #include "nsISupportsPrimitives.h"
-#include "nsNetUtil.h"
 #include "nsIURL.h"
 #include "nsCWebBrowserPersist.h"
 #include "nsToolkit.h"
@@ -38,7 +37,7 @@
 #include "gfxContext.h"
 #include "nsRect.h"
 #include "nsMathUtils.h"
-#include "gfxWindowsPlatform.h"
+#include "WinUtils.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
 #include "mozilla/gfx/Tools.h"
@@ -171,18 +170,11 @@ nsDragService::CreateDragImage(nsIDOMNode *aDOMNode,
 }
 
 //-------------------------------------------------------------------------
-NS_IMETHODIMP
-nsDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
-                                 nsISupportsArray *anArrayTransferables,
-                                 nsIScriptableRegion *aRegion,
-                                 uint32_t aActionType)
+nsresult
+nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
+                                     nsIScriptableRegion* aRegion,
+                                     uint32_t aActionType)
 {
-  nsresult rv = nsBaseDragService::InvokeDragSession(aDOMNode,
-                                                     anArrayTransferables,
-                                                     aRegion,
-                                                     aActionType);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   // Try and get source URI of the items that are being dragged
   nsIURI *uri = nullptr;
 
@@ -192,7 +184,7 @@ nsDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
   }
 
   uint32_t numItemsToDrag = 0;
-  rv = anArrayTransferables->Count(&numItemsToDrag);
+  nsresult rv = anArrayTransferables->Count(&numItemsToDrag);
   if (!numItemsToDrag)
     return NS_ERROR_FAILURE;
 
@@ -203,7 +195,7 @@ nsDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
   // "collection" object to fake out the OS. This collection contains
   // one |IDataObject| for each transferable. If there is just the one
   // (most cases), only pass around the native |IDataObject|.
-  nsRefPtr<IDataObject> itemToDrag;
+  RefPtr<IDataObject> itemToDrag;
   if (numItemsToDrag > 1) {
     nsDataObjCollection * dataObjCollection = new nsDataObjCollection();
     if (!dataObjCollection)
@@ -214,7 +206,9 @@ nsDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
       anArrayTransferables->GetElementAt(i, getter_AddRefs(supports));
       nsCOMPtr<nsITransferable> trans(do_QueryInterface(supports));
       if (trans) {
-        nsRefPtr<IDataObject> dataObj;
+        // set the requestingNode on the transferable
+        trans->SetRequestingNode(mSourceNode);
+        RefPtr<IDataObject> dataObj;
         rv = nsClipboard::CreateNativeDataObject(trans,
                                                  getter_AddRefs(dataObj), uri);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -231,6 +225,8 @@ nsDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
     anArrayTransferables->GetElementAt(0, getter_AddRefs(supports));
     nsCOMPtr<nsITransferable> trans(do_QueryInterface(supports));
     if (trans) {
+      // set the requestingNode on the transferable
+      trans->SetRequestingNode(mSourceNode);
       rv = nsClipboard::CreateNativeDataObject(trans,
                                                getter_AddRefs(itemToDrag),
                                                uri);
@@ -244,7 +240,7 @@ nsDragService::InvokeDragSession(nsIDOMNode *aDOMNode,
                                  CLSCTX_INPROC_SERVER,
                                  IID_IDragSourceHelper, (void**)&pdsh))) {
     SHDRAGIMAGE sdi;
-    if (CreateDragImage(aDOMNode, aRegion, &sdi)) {
+    if (CreateDragImage(mSourceNode, aRegion, &sdi)) {
       if (FAILED(pdsh->InitializeFromBitmap(&sdi, itemToDrag)))
         DeleteObject(sdi.hbmpDragImage);
     }
@@ -262,7 +258,7 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
 {
   // To do the drag we need to create an object that
   // implements the IDataObject interface (for OLE)
-  nsRefPtr<nsNativeDragSource> nativeDragSrc =
+  RefPtr<nsNativeDragSource> nativeDragSrc =
     new nsNativeDragSource(mDataTransfer);
 
   // Now figure out what the native drag effect should be
@@ -287,7 +283,7 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
   StartDragSession();
   OpenDragPopup();
 
-  nsRefPtr<IAsyncOperation> pAsyncOp;
+  RefPtr<IAsyncOperation> pAsyncOp;
   // Offer to do an async drag
   if (SUCCEEDED(aDataObj->QueryInterface(IID_IAsyncOperation,
                                          getter_AddRefs(pAsyncOp)))) {
@@ -329,7 +325,9 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
   // Note that we must convert this from device pixels back to Windows logical
   // pixels (bug 818927).
   DWORD pos = ::GetMessagePos();
-  FLOAT dpiScale = gfxWindowsPlatform::GetPlatform()->GetDPIScale();
+  POINT pt = { GET_X_LPARAM(pos), GET_Y_LPARAM(pos) };
+  HMONITOR monitor = ::MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+  double dpiScale = widget::WinUtils::LogToPhysFactor(monitor);
   nsIntPoint logPos(NSToIntRound(GET_X_LPARAM(pos) / dpiScale),
                     NSToIntRound(GET_Y_LPARAM(pos) / dpiScale));
   SetDragEndPoint(logPos);
@@ -424,7 +422,7 @@ nsDragService::GetData(nsITransferable * aTransferable, uint32_t anItem)
     // multiple items, use |anItem| as an index into our collection
     nsDataObjCollection * dataObjCol = GetDataObjCollection(mDataObject);
     uint32_t cnt = dataObjCol->GetNumDataObjects();
-    if (anItem >= 0 && anItem < cnt) {
+    if (anItem < cnt) {
       IDataObject * dataObj = dataObjCol->GetDataObjectAt(anItem);
       dataFound = nsClipboard::GetDataFromDataObject(dataObj, 0, nullptr,
                                                      aTransferable);
@@ -540,6 +538,14 @@ nsDragService::IsDataFlavorSupported(const char *aDataFlavor, bool *_retval)
         format = nsClipboard::GetFormat(kFileMime);
         SET_FORMATETC(fe, format, 0, DVASPECT_CONTENT, -1,
                       TYMED_HGLOBAL | TYMED_FILE | TYMED_GDI);
+        if (mDataObject->QueryGetData(&fe) == S_OK)
+          *_retval = true;                 // found it!
+      }
+      else if (strcmp(aDataFlavor, kHTMLMime) == 0) {
+        // If the client wants html, maybe it's in "HTML Format".
+        format = nsClipboard::GetFormat(kHTMLMime);
+        SET_FORMATETC(fe, format, 0, DVASPECT_CONTENT, -1,
+                      TYMED_HGLOBAL);
         if (mDataObject->QueryGetData(&fe) == S_OK)
           *_retval = true;                 // found it!
       }

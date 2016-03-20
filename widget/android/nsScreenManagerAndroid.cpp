@@ -8,6 +8,9 @@
 #include "nsScreenManagerAndroid.h"
 #include "nsWindow.h"
 #include "AndroidBridge.h"
+#include "GeneratedJNIWrappers.h"
+#include "AndroidRect.h"
+#include <mozilla/jni/Refs.h>
 
 using namespace mozilla;
 
@@ -20,15 +23,26 @@ nsScreenAndroid::~nsScreenAndroid()
 }
 
 NS_IMETHODIMP
+nsScreenAndroid::GetId(uint32_t *outId)
+{
+    *outId = 1;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
 nsScreenAndroid::GetRect(int32_t *outLeft, int32_t *outTop, int32_t *outWidth, int32_t *outHeight)
 {
-    gfxIntSize sz = nsWindow::GetAndroidScreenBounds();
+    if (!mozilla::jni::IsAvailable()) {
+      // xpcshell most likely
+      *outLeft = *outTop = *outWidth = *outHeight = 0;
+      return NS_ERROR_FAILURE;
+    }
 
-    *outLeft = 0;
-    *outTop = 0;
-
-    *outWidth = sz.width;
-    *outHeight = sz.height;
+    widget::sdk::Rect::LocalRef rect = widget::GeckoAppShell::GetScreenSize();
+    rect->Left(outLeft);
+    rect->Top(outTop);
+    rect->Width(outWidth);
+    rect->Height(outHeight);
 
     return NS_OK;
 }
@@ -45,7 +59,13 @@ nsScreenAndroid::GetAvailRect(int32_t *outLeft, int32_t *outTop, int32_t *outWid
 NS_IMETHODIMP
 nsScreenAndroid::GetPixelDepth(int32_t *aPixelDepth)
 {
-    *aPixelDepth = AndroidBridge::Bridge()->GetScreenDepth();
+    if (!mozilla::jni::IsAvailable()) {
+      // xpcshell most likely
+      *aPixelDepth = 16;
+      return NS_ERROR_FAILURE;
+    }
+
+    *aPixelDepth = widget::GeckoAppShell::GetScreenDepthWrapper();
     return NS_OK;
 }
 
@@ -59,7 +79,9 @@ nsScreenAndroid::GetColorDepth(int32_t *aColorDepth)
 void
 nsScreenAndroid::ApplyMinimumBrightness(uint32_t aBrightness)
 {
-  mozilla::widget::android::GeckoAppShell::SetKeepScreenOn(aBrightness == BRIGHTNESS_FULL);
+    if (mozilla::jni::IsAvailable()) {
+      widget::GeckoAppShell::SetKeepScreenOn(aBrightness == BRIGHTNESS_FULL);
+    }
 }
 
 NS_IMPL_ISUPPORTS(nsScreenManagerAndroid, nsIScreenManager)
@@ -78,6 +100,13 @@ nsScreenManagerAndroid::GetPrimaryScreen(nsIScreen **outScreen)
 {
     NS_IF_ADDREF(*outScreen = mOneScreen.get());
     return NS_OK;
+}
+
+NS_IMETHODIMP
+nsScreenManagerAndroid::ScreenForId(uint32_t aId,
+                                    nsIScreen **outScreen)
+{
+    return GetPrimaryScreen(outScreen);
 }
 
 NS_IMETHODIMP

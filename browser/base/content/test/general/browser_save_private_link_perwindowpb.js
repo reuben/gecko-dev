@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let {LoadContextInfo} = Cu.import("resource://gre/modules/LoadContextInfo.jsm", null);
+var {LoadContextInfo} = Cu.import("resource://gre/modules/LoadContextInfo.jsm", null);
 
 function test() {
   // initialization
@@ -24,7 +24,7 @@ function test() {
       {
         var urispec = uri.asciiSpec;
         info(urispec);
-        is(urispec.contains(filename), false, "web content present in disk cache");
+        is(urispec.includes(filename), false, "web content present in disk cache");
       },
       onCacheEntryVisitCompleted: function()
       {
@@ -53,7 +53,7 @@ function test() {
                     .get("TmpD", Ci.nsIFile);
     saveDir.append("testsavedir");
     if (!saveDir.exists())
-      saveDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0755);
+      saveDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
     return saveDir;
   }
 
@@ -92,7 +92,7 @@ function test() {
     }
 
     aWindow.gBrowser.addEventListener("pageshow", function pageShown(event) {
-      // If data: -url PAC file isn't loaded soon enough, we may get about:privatebrowsing loaded
+      // If data: --url PAC file isn't loaded soon enough, we may get about:privatebrowsing loaded
       if (event.target.location == "about:blank" ||
           event.target.location == "about:privatebrowsing") {
         aWindow.gBrowser.selectedBrowser.loadURI(testURI);
@@ -106,7 +106,7 @@ function test() {
         EventUtils.synthesizeMouseAtCenter(img,
                                            { type: "contextmenu", button: 2 },
                                            aWindow.gBrowser.contentWindow);
-      }, aWindow.gBrowser.selectedBrowser.contentWindow);
+      }, aWindow.gBrowser.selectedBrowser);
     });
   }
 
@@ -116,7 +116,7 @@ function test() {
       // execute should only be called when need, like when you are opening
       // web pages on the test. If calling executeSoon() is not necesary, then
       // call whenNewWindowLoaded() instead of testOnWindow() on your test.
-      executeSoon(function() aCallback(aWin));
+      executeSoon(() => aCallback(aWin));
     });
   };
 

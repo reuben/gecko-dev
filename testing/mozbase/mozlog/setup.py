@@ -5,7 +5,7 @@
 from setuptools import setup, find_packages
 
 PACKAGE_NAME = 'mozlog'
-PACKAGE_VERSION = '2.0'
+PACKAGE_VERSION = '3.1'
 
 setup(name=PACKAGE_NAME,
       version=PACKAGE_VERSION,
@@ -17,6 +17,7 @@ setup(name=PACKAGE_NAME,
       license='MPL 1.1/GPL 2.0/LGPL 2.1',
       packages=find_packages(),
       zip_safe=False,
+      install_requires=["blessings>=1.3"],
       tests_require=['mozfile'],
       platforms =['Any'],
       classifiers=['Development Status :: 4 - Beta',
@@ -26,10 +27,10 @@ setup(name=PACKAGE_NAME,
                    'Operating System :: OS Independent',
                    'Topic :: Software Development :: Libraries :: Python Modules',
                   ],
-      package_data={"mozlog.structured": ["formatters/html/main.js",
-                                          "formatters/html/style.css"]},
+      package_data={"mozlog": ["formatters/html/main.js",
+                               "formatters/html/style.css"]},
       entry_points={
           "console_scripts": [
-              "structlog = mozlog.structured.scripts:main"
+              "structlog = mozlog.scripts:main"
           ]}
      )

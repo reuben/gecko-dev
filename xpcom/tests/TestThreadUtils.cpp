@@ -31,6 +31,8 @@ class nsFoo : public nsISupports {
     *aBool = true;
     return NS_OK;
   }
+
+private:
   virtual ~nsFoo() {}
 };
 
@@ -55,8 +57,9 @@ private:
 };
 
 class nsBar : public nsISupports {
-  NS_DECL_ISUPPORTS
   virtual ~nsBar() {}
+public:
+  NS_DECL_ISUPPORTS
   void DoBar1(void) {
     gRunnableExecuted[TEST_CALL_VOID_ARG_VOID_RETURN] = true;
   }
@@ -115,36 +118,34 @@ int main(int argc, char** argv)
   memset(gRunnableExecuted, false, MAX_TESTS * sizeof(bool));
   // Scope the smart ptrs so that the runnables need to hold on to whatever they need
   {
-    nsRefPtr<nsFoo> foo = new nsFoo();
-    nsRefPtr<nsBar> bar = new nsBar();
+    RefPtr<nsFoo> foo = new nsFoo();
+    RefPtr<nsBar> bar = new nsBar();
 
     // This pointer will be freed at the end of the block
     // Do not dereference this pointer in the runnable method!
-    nsFoo * rawFoo = new nsFoo();
+    RefPtr<nsFoo> rawFoo = new nsFoo();
 
     // Read only string. Dereferencing in runnable method to check this works.
     char* message = (char*)"Test message";
 
     NS_DispatchToMainThread(NS_NewRunnableMethod(bar, &nsBar::DoBar1));
     NS_DispatchToMainThread(NS_NewRunnableMethod(bar, &nsBar::DoBar2));
-    NS_DispatchToMainThread(NS_NewRunnableMethodWithArg< nsRefPtr<nsFoo> >
+    NS_DispatchToMainThread(NS_NewRunnableMethodWithArg< RefPtr<nsFoo> >
       (bar, &nsBar::DoBar3, foo));
-    NS_DispatchToMainThread(NS_NewRunnableMethodWithArg< nsRefPtr<nsFoo> >
+    NS_DispatchToMainThread(NS_NewRunnableMethodWithArg< RefPtr<nsFoo> >
       (bar, &nsBar::DoBar4, foo));
     NS_DispatchToMainThread(NS_NewRunnableMethodWithArg<nsFoo*>(bar, &nsBar::DoBar5, rawFoo));
     NS_DispatchToMainThread(NS_NewRunnableMethodWithArg<char*>(bar, &nsBar::DoBar6, message));
 #ifdef HAVE_STDCALL
     NS_DispatchToMainThread(NS_NewRunnableMethod(bar, &nsBar::DoBar1std));
     NS_DispatchToMainThread(NS_NewRunnableMethod(bar, &nsBar::DoBar2std));
-    NS_DispatchToMainThread(NS_NewRunnableMethodWithArg< nsRefPtr<nsFoo> >
+    NS_DispatchToMainThread(NS_NewRunnableMethodWithArg< RefPtr<nsFoo> >
       (bar, &nsBar::DoBar3std, foo));
-    NS_DispatchToMainThread(NS_NewRunnableMethodWithArg< nsRefPtr<nsFoo> >
+    NS_DispatchToMainThread(NS_NewRunnableMethodWithArg< RefPtr<nsFoo> >
       (bar, &nsBar::DoBar4std, foo));
     NS_DispatchToMainThread(NS_NewRunnableMethodWithArg<nsFoo*>(bar, &nsBar::DoBar5std, rawFoo));
     NS_DispatchToMainThread(NS_NewRunnableMethodWithArg<char*>(bar, &nsBar::DoBar6std, message));
 #endif
-
-    delete rawFoo;
   }
 
   // Spin the event loop

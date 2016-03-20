@@ -25,8 +25,6 @@
 #include "nsIRDFService.h"
 #include "nsRDFCID.h"
 #include "rdf.h"
-#include "nsIScriptContext.h"
-#include "nsIScriptGlobalObject.h"
 #include "nsIServiceManager.h"
 #include "nsISupportsArray.h"
 #include "nsIXPConnect.h"
@@ -43,14 +41,16 @@
 #include "nsIAuthPrompt.h"
 #include "nsIProgressEventSink.h"
 #include "nsIDOMWindow.h"
-#include "nsIDOMWindowCollection.h"
 #include "nsIDOMElement.h"
 #include "nsIStreamConverterService.h"
 #include "nsICategoryManager.h"
 #include "nsXPCOMCID.h"
 #include "nsIDocument.h"
 #include "mozilla/Preferences.h"
-#include "nsCxPusher.h"
+#include "mozilla/dom/ScriptSettings.h"
+#include "nsContentUtils.h"
+#include "nsIURI.h"
+#include "nsNetUtil.h"
 
 using namespace mozilla;
 
@@ -105,7 +105,7 @@ nsHTTPIndex::GetInterface(const nsIID &anIID, void **aResult )
         if (!mRequestor) 
             return NS_ERROR_NO_INTERFACE;
 
-        nsCOMPtr<nsIDOMWindow> aDOMWindow = do_GetInterface(mRequestor);
+        nsCOMPtr<nsPIDOMWindowOuter> aDOMWindow = do_GetInterface(mRequestor);
         if (!aDOMWindow) 
             return NS_ERROR_NO_INTERFACE;
 
@@ -119,7 +119,7 @@ nsHTTPIndex::GetInterface(const nsIID &anIID, void **aResult )
         if (!mRequestor) 
             return NS_ERROR_NO_INTERFACE;
 
-        nsCOMPtr<nsIDOMWindow> aDOMWindow = do_GetInterface(mRequestor);
+        nsCOMPtr<nsPIDOMWindowOuter> aDOMWindow = do_GetInterface(mRequestor);
         if (!aDOMWindow) 
             return NS_ERROR_NO_INTERFACE;
 
@@ -150,14 +150,14 @@ nsHTTPIndex::OnFTPControlLog(bool server, const char *msg)
 {
     NS_ENSURE_TRUE(mRequestor, NS_OK);
 
-    nsCOMPtr<nsIScriptGlobalObject> scriptGlobal(do_GetInterface(mRequestor));
-    NS_ENSURE_TRUE(scriptGlobal, NS_OK);
+    nsCOMPtr<nsIGlobalObject> globalObject = do_GetInterface(mRequestor);
+    NS_ENSURE_TRUE(globalObject, NS_OK);
 
-    nsIScriptContext *context = scriptGlobal->GetContext();
-    NS_ENSURE_TRUE(context, NS_OK);
-
-    AutoPushJSContext cx(context->GetNativeContext());
-    NS_ENSURE_TRUE(cx, NS_OK);
+    // We're going to run script via JS_CallFunctionName, so we need an
+    // AutoEntryScript. This is Gecko specific and not in any spec.
+    dom::AutoEntryScript aes(globalObject,
+                             "nsHTTPIndex OnFTPControlLog");
+    JSContext* cx = aes.cx();
 
     JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
     NS_ENSURE_TRUE(global, NS_OK);
@@ -224,14 +224,15 @@ nsHTTPIndex::OnStartRequest(nsIRequest *request, nsISupports* aContext)
   if (mBindToGlobalObject && mRequestor) {
     mBindToGlobalObject = false;
 
-    // Now get the content viewer container's script object.
-    nsCOMPtr<nsIScriptGlobalObject> scriptGlobal(do_GetInterface(mRequestor));
-    NS_ENSURE_TRUE(scriptGlobal, NS_ERROR_FAILURE);
+    nsCOMPtr<nsIGlobalObject> globalObject = do_GetInterface(mRequestor);
+    NS_ENSURE_TRUE(globalObject, NS_ERROR_FAILURE);
 
-    nsIScriptContext *context = scriptGlobal->GetContext();
-    NS_ENSURE_TRUE(context, NS_ERROR_FAILURE);
+    // We might run script via JS_SetProperty, so we need an AutoEntryScript.
+    // This is Gecko specific and not in any spec.
+    dom::AutoEntryScript aes(globalObject,
+                             "nsHTTPIndex set HTTPIndex property");
+    JSContext* cx = aes.cx();
 
-    AutoPushJSContext cx(context->GetNativeContext());
     JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
 
     // Using XPConnect, wrap the HTTP index object...
@@ -239,22 +240,21 @@ nsHTTPIndex::OnStartRequest(nsIRequest *request, nsISupports* aContext)
     nsCOMPtr<nsIXPConnect> xpc(do_GetService(kXPConnectCID, &rv));
     if (NS_FAILED(rv)) return rv;
 
-    nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
+    JS::Rooted<JSObject*> jsobj(cx);
     rv = xpc->WrapNative(cx,
                          global,
                          static_cast<nsIHTTPIndex*>(this),
                          NS_GET_IID(nsIHTTPIndex),
-                         getter_AddRefs(wrapper));
+                         jsobj.address());
 
     NS_ASSERTION(NS_SUCCEEDED(rv), "unable to xpconnect-wrap http-index");
     if (NS_FAILED(rv)) return rv;
 
-    JS::Rooted<JSObject*> jsobj(cx, wrapper->GetJSObject());
     NS_ASSERTION(jsobj,
                  "unable to get jsobj from xpconnect wrapper");
     if (!jsobj) return NS_ERROR_UNEXPECTED;
 
-    JS::Rooted<JS::Value> jslistener(cx, OBJECT_TO_JSVAL(jsobj));
+    JS::Rooted<JS::Value> jslistener(cx, JS::ObjectValue(*jsobj));
 
     // ...and stuff it into the global context
     bool ok = JS_SetProperty(cx, global, "HTTPIndex", jslistener);
@@ -651,9 +651,6 @@ nsHTTPIndex::Create(nsIURI* aBaseURL, nsIInterfaceRequestor* aRequestor,
   *aResult = nullptr;
 
   nsHTTPIndex* result = new nsHTTPIndex(aRequestor);
-  if (! result)
-    return NS_ERROR_OUT_OF_MEMORY;
-
   nsresult rv = result->Init(aBaseURL);
   if (NS_SUCCEEDED(rv))
   {
@@ -945,11 +942,15 @@ nsHTTPIndex::FireTimer(nsITimer* aTimer, void* aClosure)
           rv = NS_NewURI(getter_AddRefs(url), uri.get());
           nsCOMPtr<nsIChannel>	channel;
           if (NS_SUCCEEDED(rv) && (url)) {
-            rv = NS_NewChannel(getter_AddRefs(channel), url, nullptr, nullptr);
+            rv = NS_NewChannel(getter_AddRefs(channel),
+                               url,
+                               nsContentUtils::GetSystemPrincipal(),
+                               nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                               nsIContentPolicy::TYPE_OTHER);
           }
           if (NS_SUCCEEDED(rv) && (channel)) {
             channel->SetNotificationCallbacks(httpIndex);
-            rv = channel->AsyncOpen(httpIndex, aSource);
+            rv = channel->AsyncOpen2(httpIndex);
           }
         }
   }
@@ -1261,7 +1262,7 @@ NS_IMETHODIMP
 nsDirectoryViewerFactory::CreateInstance(const char *aCommand,
                                          nsIChannel* aChannel,
                                          nsILoadGroup* aLoadGroup,
-                                         const char* aContentType, 
+                                         const nsACString& aContentType, 
                                          nsIDocShell* aContainer,
                                          nsISupports* aExtraInfo,
                                          nsIStreamListener** aDocListenerResult,
@@ -1269,7 +1270,8 @@ nsDirectoryViewerFactory::CreateInstance(const char *aCommand,
 {
   nsresult rv;
 
-  bool viewSource = aContentType && strstr(aContentType, "view-source");
+  bool viewSource = FindInReadable(NS_LITERAL_CSTRING("view-source"),
+                                   aContentType);
 
   if (!viewSource &&
       Preferences::GetInt("network.dir.format", FORMAT_XUL) == FORMAT_XUL) {
@@ -1298,16 +1300,22 @@ nsDirectoryViewerFactory::CreateInstance(const char *aCommand,
     if (NS_FAILED(rv)) return rv;
     
     nsCOMPtr<nsIChannel> channel;
-    rv = NS_NewChannel(getter_AddRefs(channel), uri, nullptr, aLoadGroup);
+    rv = NS_NewChannel(getter_AddRefs(channel),
+                       uri,
+                       nsContentUtils::GetSystemPrincipal(),
+                       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                       nsIContentPolicy::TYPE_OTHER,
+                       aLoadGroup);
     if (NS_FAILED(rv)) return rv;
     
     nsCOMPtr<nsIStreamListener> listener;
-    rv = factory->CreateInstance(aCommand, channel, aLoadGroup, "application/vnd.mozilla.xul+xml",
+    rv = factory->CreateInstance(aCommand, channel, aLoadGroup,
+                                 NS_LITERAL_CSTRING("application/vnd.mozilla.xul+xml"),
                                  aContainer, aExtraInfo, getter_AddRefs(listener),
                                  aDocViewerResult);
     if (NS_FAILED(rv)) return rv;
 
-    rv = channel->AsyncOpen(listener, nullptr);
+    rv = channel->AsyncOpen2(listener);
     if (NS_FAILED(rv)) return rv;
     
     // Create an HTTPIndex object so that we can stuff it into the script context
@@ -1350,11 +1358,13 @@ nsDirectoryViewerFactory::CreateInstance(const char *aCommand,
   nsCOMPtr<nsIStreamListener> listener;
 
   if (viewSource) {
-    rv = factory->CreateInstance("view-source", aChannel, aLoadGroup, "text/html; x-view-type=view-source",
+    rv = factory->CreateInstance("view-source", aChannel, aLoadGroup,
+                                 NS_LITERAL_CSTRING("text/html; x-view-type=view-source"),
                                  aContainer, aExtraInfo, getter_AddRefs(listener),
                                  aDocViewerResult);
   } else {
-    rv = factory->CreateInstance("view", aChannel, aLoadGroup, "text/html",
+    rv = factory->CreateInstance("view", aChannel, aLoadGroup,
+                                 NS_LITERAL_CSTRING("text/html"),
                                  aContainer, aExtraInfo, getter_AddRefs(listener),
                                  aDocViewerResult);
   }

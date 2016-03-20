@@ -15,12 +15,11 @@
 #include "nsCacheService.h"
 #include "zlib.h"
 #include "mozilla/Mutex.h"
-#include "nsVoidArray.h"
 
 /******************************************************************************
 * nsCacheEntryDescriptor
 *******************************************************************************/
-class nsCacheEntryDescriptor :
+class nsCacheEntryDescriptor final :
     public PRCList,
     public nsICacheEntryDescriptor
 {
@@ -45,7 +44,7 @@ public:
     nsCacheEntry * CacheEntry(void)      { return mCacheEntry; }
     bool           ClearCacheEntry(void)
     {
-      NS_ASSERTION(mInputWrappers.Count() == 0, "Bad state");
+      NS_ASSERTION(mInputWrappers.IsEmpty(), "Bad state");
       NS_ASSERTION(!mOutputWrapper, "Bad state");
 
       bool doomEntry = false;
@@ -117,7 +116,7 @@ private:
          bool mStreamInitialized;
          bool mStreamEnded;
      public:
-         NS_DECL_THREADSAFE_ISUPPORTS
+         NS_DECL_ISUPPORTS_INHERITED
 
          nsDecompressInputStreamWrapper(nsCacheEntryDescriptor * desc,
                                       uint32_t off)
@@ -128,8 +127,8 @@ private:
           , mStreamEnded(false)
          {
          }
-         NS_IMETHOD Read(char* buf, uint32_t count, uint32_t * result);
-         NS_IMETHOD Close();
+         NS_IMETHOD Read(char* buf, uint32_t count, uint32_t * result) override;
+         NS_IMETHOD Close() override;
      private:
          virtual ~nsDecompressInputStreamWrapper()
          {
@@ -197,7 +196,7 @@ private:
          bool mStreamEnded;
          uint32_t mUncompressedCount;
      public:
-         NS_DECL_THREADSAFE_ISUPPORTS
+         NS_DECL_ISUPPORTS_INHERITED
 
          nsCompressOutputStreamWrapper(nsCacheEntryDescriptor * desc, 
                                        uint32_t off)
@@ -209,8 +208,8 @@ private:
           , mUncompressedCount(0)
          {
          }
-         NS_IMETHOD Write(const char* buf, uint32_t count, uint32_t * result);
-         NS_IMETHOD Close();
+         NS_IMETHOD Write(const char* buf, uint32_t count, uint32_t * result) override;
+         NS_IMETHOD Close() override;
      private:
          virtual ~nsCompressOutputStreamWrapper()
          { 
@@ -226,7 +225,7 @@ private:
       */
      nsCacheEntry          * mCacheEntry; // we are a child of the entry
      nsCacheAccessMode       mAccessGranted;
-     nsVoidArray             mInputWrappers;
+     nsTArray<nsInputStreamWrapper*> mInputWrappers;
      nsOutputStreamWrapper * mOutputWrapper;
      mozilla::Mutex          mLock;
      bool                    mAsyncDoomPending;

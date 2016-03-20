@@ -7,7 +7,6 @@
 #include <QWindow>
 #ifdef MOZ_X11
 #include <qpa/qplatformnativeinterface.h>
-#include <qpa/qplatformintegration.h>
 #endif
 #include <QGuiApplication>
 #include <QScreen>
@@ -24,7 +23,7 @@
 #include "gfxQPainterSurface.h"
 #include "nsUnicodeProperties.h"
 
-#include "gfxPangoFonts.h"
+#include "gfxFontconfigFonts.h"
 #include "gfxContext.h"
 #include "gfxUserFontSet.h"
 
@@ -47,16 +46,16 @@ using namespace mozilla::gfx;
 
 gfxFontconfigUtils *gfxQtPlatform::sFontconfigUtils = nullptr;
 
-static gfxImageFormat sOffscreenFormat = gfxImageFormat::RGB24;
+static gfxImageFormat sOffscreenFormat = SurfaceFormat::X8R8G8B8_UINT32;
 
 gfxQtPlatform::gfxQtPlatform()
 {
     if (!sFontconfigUtils)
         sFontconfigUtils = gfxFontconfigUtils::GetFontconfigUtils();
 
-    mScreenDepth = qApp->primaryScreen()->depth();
-    if (mScreenDepth == 16) {
-        sOffscreenFormat = gfxImageFormat::RGB16_565;
+    int32_t depth = GetScreenDepth();
+    if (depth == 16) {
+        sOffscreenFormat = SurfaceFormat::R5G6B5_UINT16;
     }
     uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO) | BackendTypeBit(BackendType::SKIA);
     uint32_t contentMask = BackendTypeBit(BackendType::CAIRO) | BackendTypeBit(BackendType::SKIA);
@@ -90,13 +89,11 @@ gfxQtPlatform::GetXScreen(QWindow* aWindow)
 #endif
 
 already_AddRefed<gfxASurface>
-gfxQtPlatform::CreateOffscreenSurface(const IntSize& size,
-                                      gfxContentType contentType)
+gfxQtPlatform::CreateOffscreenSurface(const IntSize& aSize,
+                                      gfxImageFormat aFormat)
 {
-    gfxImageFormat imageFormat = OptimalFormatForContent(contentType);
-
-    nsRefPtr<gfxASurface> newSurface =
-        new gfxImageSurface(gfxIntSize(size.width, size.height), imageFormat);
+    RefPtr<gfxASurface> newSurface =
+        new gfxImageSurface(aSize, aFormat);
 
     return newSurface.forget();
 }
@@ -125,24 +122,35 @@ gfxQtPlatform::GetStandardFamilyName(const nsAString& aFontName, nsAString& aFam
 gfxFontGroup *
 gfxQtPlatform::CreateFontGroup(const FontFamilyList& aFontFamilyList,
                                const gfxFontStyle *aStyle,
-                               gfxUserFontSet* aUserFontSet)
+                               gfxTextPerfMetrics* aTextPerf,
+                               gfxUserFontSet* aUserFontSet,
+                               gfxFloat aDevToCssSize)
 {
-    return new gfxPangoFontGroup(aFontFamilyList, aStyle, aUserFontSet);
+    return new gfxPangoFontGroup(aFontFamilyList, aStyle,
+                                 aUserFontSet, aDevToCssSize);
 }
 
 gfxFontEntry*
-gfxQtPlatform::LookupLocalFont(const gfxProxyFontEntry *aProxyEntry,
-                                const nsAString& aFontName)
+gfxQtPlatform::LookupLocalFont(const nsAString& aFontName,
+                               uint16_t aWeight,
+                               int16_t aStretch,
+                               uint8_t aStyle)
 {
-    return gfxPangoFontGroup::NewFontEntry(*aProxyEntry, aFontName);
+    return gfxPangoFontGroup::NewFontEntry(aFontName, aWeight,
+                                           aStretch, aStyle);
 }
 
 gfxFontEntry*
-gfxQtPlatform::MakePlatformFont(const gfxProxyFontEntry *aProxyEntry,
-                                 const uint8_t *aFontData, uint32_t aLength)
+gfxQtPlatform::MakePlatformFont(const nsAString& aFontName,
+                                uint16_t aWeight,
+                                int16_t aStretch,
+                                uint8_t aStyle,
+                                const uint8_t* aFontData,
+                                uint32_t aLength)
 {
     // passing ownership of the font data to the new font entry
-    return gfxPangoFontGroup::NewFontEntry(*aProxyEntry,
+    return gfxPangoFontGroup::NewFontEntry(aFontName, aWeight,
+                                           aStretch, aStyle,
                                            aFontData, aLength);
 }
 
@@ -157,9 +165,7 @@ gfxQtPlatform::IsFontFormatSupported(nsIURI *aFontURI, uint32_t aFormatFlags)
     // Pango doesn't apply features from AAT TrueType extensions.
     // Assume that if this is the only SFNT format specified,
     // then AAT extensions are required for complex script support.
-    if (aFormatFlags & (gfxUserFontSet::FLAG_FORMAT_WOFF     |
-                        gfxUserFontSet::FLAG_FORMAT_OPENTYPE |
-                        gfxUserFontSet::FLAG_FORMAT_TRUETYPE)) {
+    if (aFormatFlags & gfxUserFontSet::FLAG_FORMATS_COMMON) {
         return true;
     }
 
@@ -191,13 +197,7 @@ gfxQtPlatform::GetOffscreenFormat()
     return sOffscreenFormat;
 }
 
-int
-gfxQtPlatform::GetScreenDepth() const
-{
-    return mScreenDepth;
-}
-
-TemporaryRef<ScaledFont>
+already_AddRefed<ScaledFont>
 gfxQtPlatform::GetScaledFontForFont(DrawTarget* aTarget, gfxFont* aFont)
 {
     return GetScaledFontForFontWithCairoSkia(aTarget, aFont);

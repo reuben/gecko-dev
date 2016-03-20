@@ -1,10 +1,12 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/SyncRunnable.h"
 #include "nsAnonymousTemporaryFile.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
@@ -81,6 +83,27 @@ GetTempDir(nsIFile** aTempDir)
   return NS_OK;
 }
 
+namespace {
+
+class nsRemoteAnonymousTemporaryFileRunnable : public nsRunnable
+{
+public:
+  dom::FileDescOrError *mResultPtr;
+  explicit nsRemoteAnonymousTemporaryFileRunnable(dom::FileDescOrError *aResultPtr)
+  : mResultPtr(aResultPtr)
+  { }
+
+protected:
+  NS_IMETHODIMP Run() {
+    dom::ContentChild* child = dom::ContentChild::GetSingleton();
+    MOZ_ASSERT(child);
+    child->SendOpenAnonymousTemporaryFile(mResultPtr);
+    return NS_OK;
+  }
+};
+
+} // namespace
+
 nsresult
 NS_OpenAnonymousTemporaryFile(PRFileDesc** aOutFileDesc)
 {
@@ -89,12 +112,22 @@ NS_OpenAnonymousTemporaryFile(PRFileDesc** aOutFileDesc)
   }
 
   if (dom::ContentChild* child = dom::ContentChild::GetSingleton()) {
-    ipc::FileDescriptor fd;
-    DebugOnly<bool> succeeded = child->SendOpenAnonymousTemporaryFile(&fd);
-    // The child process should already have been terminated if the
-    // IPC had failed.
-    MOZ_ASSERT(succeeded);
-    *aOutFileDesc = PR_ImportFile(PROsfd(fd.PlatformHandle()));
+    dom::FileDescOrError fd = NS_OK;
+    if (NS_IsMainThread()) {
+      child->SendOpenAnonymousTemporaryFile(&fd);
+    } else {
+      nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+      MOZ_ASSERT(mainThread);
+      SyncRunnable::DispatchToThread(mainThread,
+        new nsRemoteAnonymousTemporaryFileRunnable(&fd));
+    }
+    if (fd.type() == dom::FileDescOrError::Tnsresult) {
+      nsresult rv = fd.get_nsresult();
+      MOZ_ASSERT(NS_FAILED(rv));
+      return rv;
+    }
+    *aOutFileDesc =
+      PR_ImportFile(PROsfd(fd.get_FileDescriptor().PlatformHandle()));
     return NS_OK;
   }
 
@@ -156,20 +189,12 @@ NS_OpenAnonymousTemporaryFile(PRFileDesc** aOutFileDesc)
 // idle observer and its timer on shutdown. Note: the observer and idle
 // services hold references to instances of this object, and those references
 // are what keep this object alive.
-class nsAnonTempFileRemover MOZ_FINAL : public nsIObserver
+class nsAnonTempFileRemover final : public nsIObserver
 {
 public:
   NS_DECL_ISUPPORTS
 
-  nsAnonTempFileRemover()
-  {
-    MOZ_COUNT_CTOR(nsAnonTempFileRemover);
-  }
-
-  ~nsAnonTempFileRemover()
-  {
-    MOZ_COUNT_DTOR(nsAnonTempFileRemover);
-  }
+  nsAnonTempFileRemover() {}
 
   nsresult Init()
   {
@@ -263,6 +288,8 @@ public:
   }
 
 private:
+  ~nsAnonTempFileRemover() {}
+
   nsCOMPtr<nsITimer> mTimer;
 };
 
@@ -276,10 +303,10 @@ CreateAnonTempFileRemover()
   // is a shutdown observer. We only create the temp file remover if we're running
   // in the main process; there's no point in doing the temp file removal multiple
   // times per startup.
-  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+  if (!XRE_IsParentProcess()) {
     return NS_OK;
   }
-  nsRefPtr<nsAnonTempFileRemover> tempRemover = new nsAnonTempFileRemover();
+  RefPtr<nsAnonTempFileRemover> tempRemover = new nsAnonTempFileRemover();
   return tempRemover->Init();
 }
 

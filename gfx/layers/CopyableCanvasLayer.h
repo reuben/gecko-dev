@@ -22,15 +22,11 @@
 
 namespace mozilla {
 
-namespace gfx {
-class SurfaceStream;
+namespace gl {
 class SharedSurface;
-class SurfaceFactory;
-}
+} // namespace gl
 
 namespace layers {
-
-class CanvasClientWebGL;
 
 /**
  * A shared CanvasLayer implementation that supports copying
@@ -40,11 +36,14 @@ class CopyableCanvasLayer : public CanvasLayer
 {
 public:
   CopyableCanvasLayer(LayerManager* aLayerManager, void *aImplData);
+
+protected:
   virtual ~CopyableCanvasLayer();
 
-  virtual void Initialize(const Data& aData);
+public:
+  virtual void Initialize(const Data& aData) override;
 
-  virtual bool IsDataValid(const Data& aData);
+  virtual bool IsDataValid(const Data& aData) override;
 
   bool IsGLLayer() { return !!mGLContext; }
 
@@ -52,15 +51,14 @@ protected:
   void UpdateTarget(gfx::DrawTarget* aDestTarget = nullptr);
 
   RefPtr<gfx::SourceSurface> mSurface;
-  nsRefPtr<mozilla::gl::GLContext> mGLContext;
-  mozilla::RefPtr<mozilla::gfx::DrawTarget> mDrawTarget;
+  RefPtr<gl::GLContext> mGLContext;
+  GLuint mCanvasFrontbufferTexID;
+  RefPtr<PersistentBufferProvider> mBufferProvider;
 
-  RefPtr<gfx::SurfaceStream> mStream;
-
-  uint32_t mCanvasFramebuffer;
+  UniquePtr<gl::SharedSurface> mGLFrontbuffer;
 
   bool mIsAlphaPremultiplied;
-  bool mNeedsYFlip;
+  gl::OriginPos mOriginPos;
 
   RefPtr<gfx::DataSourceSurface> mCachedTempSurface;
 
@@ -70,7 +68,7 @@ protected:
   void DiscardTempSurface();
 };
 
-}
-}
+} // namespace layers
+} // namespace mozilla
 
 #endif

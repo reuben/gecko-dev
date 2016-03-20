@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -17,12 +18,12 @@
 
 // a class that's nsISupports-specific, so that we can contain the
 // work of this class in the XPCOM dll
-class NS_COM_GLUE nsCOMArray_base
+class nsCOMArray_base
 {
   friend class nsArrayBase;
 protected:
   nsCOMArray_base() {}
-  nsCOMArray_base(int32_t aCount) : mArray(aCount) {}
+  explicit nsCOMArray_base(int32_t aCount) : mArray(aCount) {}
   nsCOMArray_base(const nsCOMArray_base& aOther);
   ~nsCOMArray_base();
 
@@ -162,15 +163,17 @@ public:
   void SetCapacity(uint32_t aCapacity) { mArray.SetCapacity(aCapacity); }
   uint32_t Capacity() { return mArray.Capacity(); }
 
-  typedef size_t (*nsBaseArraySizeOfElementIncludingThisFunc)(
-    nsISupports* aElement, mozilla::MallocSizeOf aMallocSizeOf, void* aData);
-
-  // Measures the size of the array's element storage, and if
-  // |aSizeOfElement| is non-nullptr, measures the size of things pointed to
-  // by elements.
-  size_t SizeOfExcludingThis(
-    nsBaseArraySizeOfElementIncludingThisFunc aSizeOfElementIncludingThis,
-    mozilla::MallocSizeOf aMallocSizeOf, void* aData = nullptr) const;
+  // Measures the size of the array's element storage. If you want to measure
+  // anything hanging off the array, you must iterate over the elements and
+  // measure them individually; hence the "Shallow" prefix. Note that because
+  // each element in an nsCOMArray<T> is actually a T* any such iteration
+  // should use a SizeOfIncludingThis() function on each element rather than a
+  // SizeOfExcludingThis() function, so that the memory taken by the T itself
+  // is included as well as anything it points to.
+  size_t ShallowSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+  {
+    return mArray.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  }
 
 private:
 
@@ -178,7 +181,7 @@ private:
   nsTArray<nsISupports*> mArray;
 
   // don't implement these, defaults will muck with refcounts!
-  nsCOMArray_base& operator=(const nsCOMArray_base& aOther) MOZ_DELETE;
+  nsCOMArray_base& operator=(const nsCOMArray_base& aOther) = delete;
 };
 
 inline void
@@ -215,10 +218,9 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
 // * modified/removed. Be careful not to NS_RELEASE(foo)!
 // T* foo = array[i];
 //
-// This array will accept null as an argument for any object, and will
-// store null in the array, just like nsVoidArray. But that also means
-// that methods like ObjectAt() may return null when referring to an
-// existing, but null entry in the array.
+// This array will accept null as an argument for any object, and will store
+// null in the array. But that also means that methods like ObjectAt() may
+// return null when referring to an existing, but null entry in the array.
 template<class T>
 class nsCOMArray : public nsCOMArray_base
 {
@@ -402,21 +404,6 @@ public:
     nsCOMArray_base::SwapElements(aOther);
   }
 
-  // Each element in an nsCOMArray<T> is actually a T*, so this function is
-  // "IncludingThis" rather than "ExcludingThis" because it needs to measure
-  // the memory taken by the T itself as well as anything it points to.
-  typedef size_t (*nsCOMArraySizeOfElementIncludingThisFunc)(
-    T* aElement, mozilla::MallocSizeOf aMallocSizeOf, void* aData);
-
-  size_t SizeOfExcludingThis(
-      nsCOMArraySizeOfElementIncludingThisFunc aSizeOfElementIncludingThis,
-      mozilla::MallocSizeOf aMallocSizeOf, void* aData = nullptr) const
-  {
-    return nsCOMArray_base::SizeOfExcludingThis(
-      nsBaseArraySizeOfElementIncludingThisFunc(aSizeOfElementIncludingThis),
-      aMallocSizeOf, aData);
-  }
-
   /**
    * Adopt parameters that resulted from an XPIDL outparam. The aElements
    * parameter will be freed as a result of the call.
@@ -449,7 +436,7 @@ public:
 private:
 
   // don't implement these!
-  nsCOMArray<T>& operator=(const nsCOMArray<T>& aOther) MOZ_DELETE;
+  nsCOMArray<T>& operator=(const nsCOMArray<T>& aOther) = delete;
 };
 
 template<typename T>

@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -22,10 +21,10 @@ namespace mozilla {
  * to instead use the RAII wrappers MonitorAutoLock and
  * MonitorAutoUnlock.
  */
-class NS_COM_GLUE Monitor
+class Monitor
 {
 public:
-  Monitor(const char* aName)
+  explicit Monitor(const char* aName)
     : mMutex(aName)
     , mCondVar(mMutex, "[Monitor.mCondVar]")
   {
@@ -70,10 +69,10 @@ private:
  * The monitor must be unlocked when instances of this class are
  * created.
  */
-class NS_COM_GLUE MOZ_STACK_CLASS MonitorAutoLock
+class MOZ_STACK_CLASS MonitorAutoLock
 {
 public:
-  MonitorAutoLock(Monitor& aMonitor)
+  explicit MonitorAutoLock(Monitor& aMonitor)
     : mMonitor(&aMonitor)
   {
     mMonitor->Lock();
@@ -97,7 +96,6 @@ private:
   MonitorAutoLock(const MonitorAutoLock&);
   MonitorAutoLock& operator=(const MonitorAutoLock&);
   static void* operator new(size_t) CPP_THROW_NEW;
-  static void operator delete(void*);
 
   Monitor* mMonitor;
 };
@@ -109,10 +107,10 @@ private:
  * The monitor must be locked by the current thread when instances of
  * this class are created.
  */
-class NS_COM_GLUE MOZ_STACK_CLASS MonitorAutoUnlock
+class MOZ_STACK_CLASS MonitorAutoUnlock
 {
 public:
-  MonitorAutoUnlock(Monitor& aMonitor)
+  explicit MonitorAutoUnlock(Monitor& aMonitor)
     : mMonitor(&aMonitor)
   {
     mMonitor->Unlock();
@@ -128,7 +126,6 @@ private:
   MonitorAutoUnlock(const MonitorAutoUnlock&);
   MonitorAutoUnlock& operator=(const MonitorAutoUnlock&);
   static void* operator new(size_t) CPP_THROW_NEW;
-  static void operator delete(void*);
 
   Monitor* mMonitor;
 };

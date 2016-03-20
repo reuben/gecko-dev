@@ -10,7 +10,9 @@
 #include "FrameMetrics.h"               // for FrameMetrics, etc
 #include "Units.h"                      // for CSSPoint, CSSRect, etc
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "mozilla/EventForwards.h"      // for Modifiers
 #include "nsISupportsImpl.h"
+#include "ThreadSafeRefcountingWithMainThreadDestruction.h"
 
 class Task;
 
@@ -20,13 +22,27 @@ namespace layers {
 class GeckoContentController
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GeckoContentController)
+  /**
+   * At least one class deriving from GeckoContentController needs to do
+   * synchronous cleanup on the main thread, so we use
+   * NS_INLINE_DECL_THREADSAFE_REFCOUNTING_WITH_MAIN_THREAD_DESTRUCTION.
+   */
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_WITH_MAIN_THREAD_DESTRUCTION(GeckoContentController)
 
   /**
    * Requests a paint of the given FrameMetrics |aFrameMetrics| from Gecko.
    * Implementations per-platform are responsible for actually handling this.
+   * This method will always be called on the Gecko main thread.
    */
   virtual void RequestContentRepaint(const FrameMetrics& aFrameMetrics) = 0;
+
+  /**
+   * Requests handling of a scroll snapping at the end of a fling gesture for
+   * the scrollable frame with the given scroll id. aDestination specifies the
+   * expected landing position of the fling if no snapping were to be performed.
+   */
+  virtual void RequestFlingSnap(const FrameMetrics::ViewID& aScrollId,
+                                const mozilla::CSSPoint& aDestination) = 0;
 
   /**
    * Acknowledges the recipt of a scroll offset update for the scrollable
@@ -43,7 +59,7 @@ public:
    * to.
    */
   virtual void HandleDoubleTap(const CSSPoint& aPoint,
-                               int32_t aModifiers,
+                               Modifiers aModifiers,
                                const ScrollableLayerGuid& aGuid) = 0;
 
   /**
@@ -52,7 +68,7 @@ public:
    * button down, then mouse button up at |aPoint|.
    */
   virtual void HandleSingleTap(const CSSPoint& aPoint,
-                               int32_t aModifiers,
+                               Modifiers aModifiers,
                                const ScrollableLayerGuid& aGuid) = 0;
 
   /**
@@ -60,44 +76,16 @@ public:
    * current scroll offset.
    */
   virtual void HandleLongTap(const CSSPoint& aPoint,
-                             int32_t aModifiers,
-                             const ScrollableLayerGuid& aGuid) = 0;
-
-  /**
-   * Requests handling of releasing a long tap. |aPoint| is in CSS pixels,
-   * relative to the current scroll offset. HandleLongTapUp will always be
-   * preceeded by HandleLongTap. However not all calls to HandleLongTap will
-   * be followed by a HandleLongTapUp (for example, if the user drags
-   * around between the long-tap and lifting their finger).
-   */
-  virtual void HandleLongTapUp(const CSSPoint& aPoint,
-                               int32_t aModifiers,
-                               const ScrollableLayerGuid& aGuid) = 0;
-
-  /**
-   * Requests sending a mozbrowserasyncscroll domevent to embedder.
-   * |aContentRect| is in CSS pixels, relative to the current cssPage.
-   * |aScrollableSize| is the current content width/height in CSS pixels.
-   */
-  virtual void SendAsyncScrollDOMEvent(bool aIsRoot,
-                                       const CSSRect &aContentRect,
-                                       const CSSSize &aScrollableSize) = 0;
+                             Modifiers aModifiers,
+                             const ScrollableLayerGuid& aGuid,
+                             uint64_t aInputBlockId) = 0;
 
   /**
    * Schedules a runnable to run on the controller/UI thread at some time
    * in the future.
+   * This method must always be called on the controller thread.
    */
   virtual void PostDelayedTask(Task* aTask, int aDelayMs) = 0;
-
-  /**
-   * Retrieves the last known zoom constraints for the root scrollable layer
-   * for this layers tree. This function should return false if there are no
-   * last known zoom constraints.
-   */
-  virtual bool GetRootZoomConstraints(ZoomConstraints* aOutConstraints)
-  {
-    return false;
-  }
 
   /**
    * APZ uses |FrameMetrics::mCompositionBounds| for hit testing. Sometimes,
@@ -106,6 +94,7 @@ public:
    * controller. This method allows APZ to query the controller for such a
    * region. A return value of true indicates that the controller has such a
    * region, and it is returned in |aOutRegion|.
+   * This method needs to be called on the main thread.
    * TODO: once bug 928833 is implemented, this should be removed, as
    * APZ can then get the correct touch-sensitive region for each frame
    * directly from the layer.
@@ -115,7 +104,7 @@ public:
     return false;
   }
 
-  MOZ_BEGIN_NESTED_ENUM_CLASS(APZStateChange, int8_t)
+  enum APZStateChange {
     /**
      * APZ started modifying the view (including panning, zooming, and fling).
      */
@@ -139,8 +128,7 @@ public:
      */
     EndTouch,
     APZStateChangeSentinel
-  MOZ_END_NESTED_ENUM_CLASS(APZStateChange)
-
+  };
   /**
    * General notices of APZ state changes for consumers.
    * |aGuid| identifies the APZC originating the state change.
@@ -152,16 +140,33 @@ public:
                                     APZStateChange aChange,
                                     int aArg = 0) {}
 
+  /**
+   * Notify content of a MozMouseScrollFailed event.
+   */
+  virtual void NotifyMozMouseScrollEvent(const FrameMetrics::ViewID& aScrollId, const nsString& aEvent)
+  {}
+
+  /**
+   * Notify content that the repaint requests have been flushed.
+   */
+  virtual void NotifyFlushComplete() = 0;
+
+  virtual void UpdateOverscrollVelocity(const float aX, const float aY) {}
+  virtual void UpdateOverscrollOffset(const float aX,const  float aY) {}
+
   GeckoContentController() {}
+  virtual void ChildAdopted() {}
+  /**
+   * Needs to be called on the main thread.
+   */
+  virtual void Destroy() {}
 
 protected:
   // Protected destructor, to discourage deletion outside of Release():
   virtual ~GeckoContentController() {}
 };
 
-MOZ_FINISH_NESTED_ENUM_CLASS(GeckoContentController::APZStateChange)
-
-}
-}
+} // namespace layers
+} // namespace mozilla
 
 #endif // mozilla_layers_GeckoContentController_h

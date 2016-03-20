@@ -4,8 +4,8 @@
 // found in the LICENSE file.
 //
 
-#ifndef COMPILER_PREPROCESSOR_MACRO_EXPANDER_H_
-#define COMPILER_PREPROCESSOR_MACRO_EXPANDER_H_
+#ifndef COMPILER_PREPROCESSOR_MACROEXPANDER_H_
+#define COMPILER_PREPROCESSOR_MACROEXPANDER_H_
 
 #include <cassert>
 #include <memory>
@@ -19,57 +19,74 @@ namespace pp
 {
 
 class Diagnostics;
+struct SourceLocation;
 
 class MacroExpander : public Lexer
 {
   public:
-    MacroExpander(Lexer* lexer, MacroSet* macroSet, Diagnostics* diagnostics);
-    virtual ~MacroExpander();
+    MacroExpander(Lexer *lexer, MacroSet *macroSet, Diagnostics *diagnostics, bool parseDefined);
+    ~MacroExpander() override;
 
-    virtual void lex(Token* token);
+    void lex(Token *token) override;
 
   private:
     PP_DISALLOW_COPY_AND_ASSIGN(MacroExpander);
 
-    void getToken(Token* token);
-    void ungetToken(const Token& token);
+    void getToken(Token *token);
+    void ungetToken(const Token &token);
     bool isNextTokenLeftParen();
 
-    bool pushMacro(const Macro& macro, const Token& identifier);
+    bool pushMacro(const Macro &macro, const Token &identifier);
     void popMacro();
 
-    bool expandMacro(const Macro& macro,
-                     const Token& identifier,
-                     std::vector<Token>* replacements);
+    bool expandMacro(const Macro &macro,
+                     const Token &identifier,
+                     std::vector<Token> *replacements);
 
     typedef std::vector<Token> MacroArg;
-    bool collectMacroArgs(const Macro& macro,
-                          const Token& identifier,
-                          std::vector<MacroArg>* args);
-    void replaceMacroParams(const Macro& macro,
-                            const std::vector<MacroArg>& args,
-                            std::vector<Token>* replacements);
+    bool collectMacroArgs(const Macro &macro,
+                          const Token &identifier,
+                          std::vector<MacroArg> *args,
+                          SourceLocation *closingParenthesisLocation);
+    void replaceMacroParams(const Macro &macro,
+                            const std::vector<MacroArg> &args,
+                            std::vector<Token> *replacements);
 
     struct MacroContext
     {
-        const Macro* macro;
+        const Macro *macro;
         std::size_t index;
         std::vector<Token> replacements;
 
-        MacroContext() : macro(0), index(0) { }
-        bool empty() const { return index == replacements.size(); }
-        const Token& get() { return replacements[index++]; }
-        void unget() { assert(index > 0); --index; }
+        MacroContext()
+            : macro(0),
+              index(0)
+        {
+        }
+        bool empty() const
+        {
+            return index == replacements.size();
+        }
+        const Token &get()
+        {
+            return replacements[index++];
+        }
+        void unget()
+        {
+            assert(index > 0);
+            --index;
+        }
     };
 
-    Lexer* mLexer;
-    MacroSet* mMacroSet;
-    Diagnostics* mDiagnostics;
+    Lexer *mLexer;
+    MacroSet *mMacroSet;
+    Diagnostics *mDiagnostics;
+    bool mParseDefined;
 
     std::auto_ptr<Token> mReserveToken;
-    std::vector<MacroContext*> mContextStack;
+    std::vector<MacroContext *> mContextStack;
 };
 
 }  // namespace pp
-#endif  // COMPILER_PREPROCESSOR_MACRO_EXPANDER_H_
 
+#endif  // COMPILER_PREPROCESSOR_MACROEXPANDER_H_

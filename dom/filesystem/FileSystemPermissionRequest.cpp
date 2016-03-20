@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,10 +8,9 @@
 #include "mozilla/dom/FileSystemBase.h"
 #include "mozilla/dom/FileSystemTaskBase.h"
 #include "mozilla/dom/FileSystemUtils.h"
-#include "mozilla/dom/TabChild.h"
 #include "nsIDocument.h"
 #include "nsPIDOMWindow.h"
-#include "nsString.h"
+#include "nsContentPermissionHelper.h"
 
 namespace mozilla {
 namespace dom {
@@ -24,7 +23,7 @@ FileSystemPermissionRequest::RequestForTask(FileSystemTaskBase* aTask)
 {
   MOZ_ASSERT(aTask, "aTask should not be null!");
   MOZ_ASSERT(NS_IsMainThread());
-  nsRefPtr<FileSystemPermissionRequest> request =
+  RefPtr<FileSystemPermissionRequest> request =
     new FileSystemPermissionRequest(aTask);
   NS_DispatchToCurrentThread(request);
 }
@@ -38,7 +37,7 @@ FileSystemPermissionRequest::FileSystemPermissionRequest(
 
   mTask->GetPermissionAccessType(mPermissionAccess);
 
-  nsRefPtr<FileSystemBase> filesystem = mTask->GetFileSystem();
+  RefPtr<FileSystemBase> filesystem = mTask->GetFileSystem();
   if (!filesystem) {
     return;
   }
@@ -56,40 +55,21 @@ FileSystemPermissionRequest::FileSystemPermissionRequest(
   }
 
   mPrincipal = doc->NodePrincipal();
+  mRequester = new nsContentPermissionRequester(mWindow);
 }
 
 FileSystemPermissionRequest::~FileSystemPermissionRequest()
 {
 }
 
-bool
-FileSystemPermissionRequest::Recv__delete__(const bool& aAllow,
-               const InfallibleTArray<PermissionChoice>& aChoices)
-{
-  MOZ_ASSERT(aChoices.IsEmpty(),
-             "FileSystemPermissionRequest doesn't support permission choice");
-  if (aAllow) {
-    Allow(JS::UndefinedHandleValue);
-  } else {
-    Cancel();
-  }
-  return true;
-}
-
-void
-FileSystemPermissionRequest::IPDLRelease()
-{
-  Release();
-}
-
 NS_IMETHODIMP
 FileSystemPermissionRequest::GetTypes(nsIArray** aTypes)
 {
   nsTArray<nsString> emptyOptions;
-  return CreatePermissionArray(mPermissionType,
-                               mPermissionAccess,
-                               emptyOptions,
-                               aTypes);
+  return nsContentPermissionUtils::CreatePermissionArray(mPermissionType,
+                                                         mPermissionAccess,
+                                                         emptyOptions,
+                                                         aTypes);
 }
 
 NS_IMETHODIMP
@@ -100,7 +80,7 @@ FileSystemPermissionRequest::GetPrincipal(nsIPrincipal** aRequestingPrincipal)
 }
 
 NS_IMETHODIMP
-FileSystemPermissionRequest::GetWindow(nsIDOMWindow** aRequestingWindow)
+FileSystemPermissionRequest::GetWindow(mozIDOMWindow** aRequestingWindow)
 {
   NS_IF_ADDREF(*aRequestingWindow = mWindow);
   return NS_OK;
@@ -136,23 +116,14 @@ FileSystemPermissionRequest::Run()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsRefPtr<FileSystemBase> filesystem = mTask->GetFileSystem();
+  RefPtr<FileSystemBase> filesystem = mTask->GetFileSystem();
   if (!filesystem) {
     Cancel();
     return NS_OK;
   }
 
-  if (filesystem->IsTesting()) {
+  if (!filesystem->RequiresPermissionChecks()) {
     Allow(JS::UndefinedHandleValue);
-    return NS_OK;
-  }
-
-  if (FileSystemUtils::IsParentProcess()) {
-    nsCOMPtr<nsIContentPermissionPrompt> prompt
-      = do_CreateInstance(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
-    if (!prompt || NS_FAILED(prompt->Prompt(this))) {
-      Cancel();
-    }
     return NS_OK;
   }
 
@@ -161,28 +132,17 @@ FileSystemPermissionRequest::Run()
     return NS_OK;
   }
 
-  // because owner implements nsITabChild, we can assume that it is
-  // the one and only TabChild.
-  TabChild* child = TabChild::GetFrom(mWindow->GetDocShell());
-  if (!child) {
-    Cancel();
-    return NS_OK;
-  }
+  nsContentPermissionUtils::AskPermission(this, mWindow);
+  return NS_OK;
+}
 
-  // Retain a reference so the object isn't deleted without IPDL's
-  // knowledge. Corresponding release occurs in
-  // DeallocPContentPermissionRequest.
-  AddRef();
+NS_IMETHODIMP
+FileSystemPermissionRequest::GetRequester(nsIContentPermissionRequester** aRequester)
+{
+  NS_ENSURE_ARG_POINTER(aRequester);
 
-  nsTArray<PermissionRequest> permArray;
-  nsTArray<nsString> emptyOptions;
-  permArray.AppendElement(PermissionRequest(mPermissionType,
-                                            mPermissionAccess,
-                                            emptyOptions));
-  child->SendPContentPermissionRequestConstructor(
-    this, permArray, IPC::Principal(mPrincipal));
-
-  Sendprompt();
+  nsCOMPtr<nsIContentPermissionRequester> requester = mRequester;
+  requester.forget(aRequester);
   return NS_OK;
 }
 

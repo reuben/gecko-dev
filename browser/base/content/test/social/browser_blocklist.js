@@ -4,23 +4,21 @@
 
 // a place for miscellaneous social tests
 
-let SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
+var SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
 
 const URI_EXTENSION_BLOCKLIST_DIALOG = "chrome://mozapps/content/extensions/blocklist.xul";
-let blocklistURL = "http://example.com/browser/browser/base/content/test/social/blocklist.xml";
+var blocklistURL = "http://example.com/browser/browser/base/content/test/social/blocklist.xml";
 
-let manifest = { // normal provider
+var manifest = { // normal provider
   name: "provider ok",
   origin: "https://example.com",
   sidebarURL: "https://example.com/browser/browser/base/content/test/social/social_sidebar.html",
-  workerURL: "https://example.com/browser/browser/base/content/test/social/social_worker.js",
   iconURL: "https://example.com/browser/browser/base/content/test/general/moz.png"
 };
-let manifest_bad = { // normal provider
+var manifest_bad = { // normal provider
   name: "provider blocked",
   origin: "https://test1.example.com",
   sidebarURL: "https://test1.example.com/browser/browser/base/content/test/social/social_sidebar.html",
-  workerURL: "https://test1.example.com/browser/browser/base/content/test/social/social_worker.js",
   iconURL: "https://test1.example.com/browser/browser/base/content/test/general/moz.png"
 };
 
@@ -60,12 +58,12 @@ var tests = {
       try {
         SocialService.addProvider(manifest, function(provider) {
           try {
-            SocialService.removeProvider(provider.origin, function() {
+            SocialService.disableProvider(provider.origin, function() {
               ok(true, "added and removed provider");
               finishTest(true);
             });
           } catch(e) {
-            ok(false, "SocialService.removeProvider threw exception: " + e);
+            ok(false, "SocialService.disableProvider threw exception: " + e);
             finishTest(false);
           }
         });
@@ -85,7 +83,7 @@ var tests = {
     setAndUpdateBlocklist(blocklistURL, function() {
       try {
         SocialService.addProvider(manifest_bad, function(provider) {
-          SocialService.removeProvider(provider.origin, function() {
+          SocialService.disableProvider(provider.origin, function() {
             ok(false, "SocialService.addProvider should throw blocklist exception");
             finishTest(false);
           });
@@ -113,7 +111,13 @@ var tests = {
         try {
           // expecting an exception when attempting to install a hard blocked
           // provider
-          Social.installProvider(doc, manifest_bad, function(addonManifest) {
+          let data = {
+            origin: doc.nodePrincipal.origin,
+            url: doc.location.href,
+            manifest: manifest_bad,
+            window: window
+          }
+          Social.installProvider(data, function(addonManifest) {
             gBrowser.removeTab(tab);
             finishTest(false);
           });

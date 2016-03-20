@@ -36,6 +36,7 @@
 #include "nsTreeSanitizer.h"
 #include "nsHtml5Module.h"
 #include "mozilla/dom/DocumentFragment.h"
+#include "nsNullPrincipal.h"
 
 #define XHTML_DIV_TAG "div xmlns=\"http://www.w3.org/1999/xhtml\""
 
@@ -44,10 +45,6 @@ using namespace mozilla::dom;
 NS_IMPL_ISUPPORTS(nsParserUtils,
                   nsIScriptableUnescapeHTML,
                   nsIParserUtils)
-
-static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
-
-
 
 NS_IMETHODIMP
 nsParserUtils::ConvertToPlainText(const nsAString& aFromStr,
@@ -79,8 +76,7 @@ nsParserUtils::Sanitize(const nsAString& aFromStr,
 {
   nsCOMPtr<nsIURI> uri;
   NS_NewURI(getter_AddRefs(uri), "about:blank");
-  nsCOMPtr<nsIPrincipal> principal =
-    do_CreateInstance("@mozilla.org/nullprincipal;1");
+  nsCOMPtr<nsIPrincipal> principal = nsNullPrincipal::Create();
   nsCOMPtr<nsIDOMDocument> domDocument;
   nsresult rv = NS_NewDOMDocument(getter_AddRefs(domDocument),
                                   EmptyString(),
@@ -152,7 +148,7 @@ nsParserUtils::ParseFragment(const nsAString& aFragment,
   nsAutoScriptBlockerSuppressNodeRemoved autoBlocker;
 
   // stop scripts
-  nsRefPtr<nsScriptLoader> loader;
+  RefPtr<nsScriptLoader> loader;
   bool scripts_enabled = false;
   if (document) {
     loader = document->ScriptLoader();
@@ -164,7 +160,7 @@ nsParserUtils::ParseFragment(const nsAString& aFragment,
 
   // Wrap things in a div or body for parsing, but it won't show up in
   // the fragment.
-  nsAutoTArray<nsString, 2> tagStack;
+  AutoTArray<nsString, 2> tagStack;
   nsAutoCString base, spec;
   if (aIsXML) {
     // XHTML
@@ -177,7 +173,7 @@ nsParserUtils::ParseFragment(const nsAString& aFragment,
       char* escapedSpec = nsEscapeHTML(spec.get());
       if (escapedSpec)
         base += escapedSpec;
-      NS_Free(escapedSpec);
+      free(escapedSpec);
       base.Append('"');
       tagStack.AppendElement(NS_ConvertUTF8toUTF16(base));
     }  else {

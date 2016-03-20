@@ -12,12 +12,12 @@ SOURCES += [
     'nsRDFModule.cpp',
 ]
 
-LIBRARY_NAME = 'rdf'
-
 FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
-    '../base/src',
-    '../content/src',
-    '../datasource/src',
+    '/rdf/base',
+    '/rdf/datasource',
 ]
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wshadow']

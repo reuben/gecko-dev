@@ -12,6 +12,8 @@
 #include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsError.h"
+#include "nsTArray.h"
+#include "mozilla/UniquePtr.h"
 
 // http version codes
 #define NS_HTTP_VERSION_UNKNOWN  0
@@ -26,9 +28,10 @@ class Mutex;
 
 namespace net {
     enum {
-        SPDY_VERSION_2_REMOVED = 2,
-        SPDY_VERSION_3 = 3,
+        // SPDY_VERSION_2 = 2, REMOVED
+        // SPDY_VERSION_3 = 3, REMOVED
         SPDY_VERSION_31 = 4,
+        HTTP_VERSION_2 = 5
 
         // leave room for official versions. telem goes to 48
         // 24 was a internal spdy/3.1
@@ -36,13 +39,12 @@ namespace net {
         // 26 was http/2-draft08 and http/2-draft07 (they were the same)
         // 27 was http/2-draft09, h2-10, and h2-11
         // 28 was http/2-draft12
-        HTTP2_VERSION_DRAFT13 = 29
+        // 29 was http/2-draft13
+        // 30 was h2-14 and h2-15
+        // 31 was h2-16
     };
 
 typedef uint8_t nsHttpVersion;
-
-#define NS_HTTP2_DRAFT_VERSION HTTP2_VERSION_DRAFT13
-#define NS_HTTP2_DRAFT_TOKEN "h2-13"
 
 //-----------------------------------------------------------------------------
 // http connection capabilities
@@ -79,9 +81,8 @@ typedef uint8_t nsHttpVersion;
 // group is currently blocking on some resources
 #define NS_HTTP_LOAD_UNBLOCKED       (1<<8)
 
-// These flags allow a transaction to use TLS false start with
-// weaker security profiles based on past history
-#define NS_HTTP_ALLOW_RSA_FALSESTART (1<<9)
+// This flag indicates the transaction should accept associated pushes
+#define NS_HTTP_ONPUSH_LISTENER      (1<<9)
 
 //-----------------------------------------------------------------------------
 // some default values
@@ -129,10 +130,14 @@ struct nsHttp
     // section 2.2
     static bool IsValidToken(const char *start, const char *end);
 
-    static inline bool IsValidToken(const nsCString &s) {
-        const char *start = s.get();
-        return IsValidToken(start, start + s.Length());
+    static inline bool IsValidToken(const nsACString &s) {
+        return IsValidToken(s.BeginReading(), s.EndReading());
     }
+
+    // Returns true if the specified value is reasonable given the defintion
+    // in RFC 2616 section 4.2.  Full strict validation is not performed
+    // currently as it would require full parsing of the value.
+    static bool IsReasonableHeaderValue(const nsACString &s);
 
     // find the first instance (case-insensitive comparison) of the given
     // |token| in the |input| string.  the |token| is bounded by elements of
@@ -163,6 +168,9 @@ struct nsHttp
     // Return whether the HTTP status code represents a permanent redirect
     static bool IsPermanentRedirect(uint32_t httpStatus);
 
+    // Returns the APLN token which represents the used protocol version.
+    static const char* GetProtocolVersion(uint32_t pv);
+
     // Declare all atoms
     //
     // The atom names and values are stored in nsHttpAtomList.h and are brought
@@ -192,12 +200,62 @@ PRTimeToSeconds(PRTime t_usec)
 #define HTTP_LWS " \t"
 #define HTTP_HEADER_VALUE_SEPS HTTP_LWS ","
 
-void EnsureBuffer(nsAutoArrayPtr<char> &buf, uint32_t newSize,
+void EnsureBuffer(UniquePtr<char[]> &buf, uint32_t newSize,
                   uint32_t preserve, uint32_t &objSize);
-void EnsureBuffer(nsAutoArrayPtr<uint8_t> &buf, uint32_t newSize,
+void EnsureBuffer(UniquePtr<uint8_t[]> &buf, uint32_t newSize,
                   uint32_t preserve, uint32_t &objSize);
 
-} // namespace mozilla::net
+// h2=":443"; ma=60; single
+// results in 3 mValues = {{h2, :443}, {ma, 60}, {single}}
+
+class ParsedHeaderPair
+{
+public:
+    ParsedHeaderPair(const char *name, int32_t nameLen,
+                     const char *val, int32_t valLen)
+    {
+        if (nameLen > 0) {
+            mName.Rebind(name, name + nameLen);
+        }
+        if (valLen > 0) {
+            mValue.Rebind(val, val + valLen);
+        }
+    }
+
+    ParsedHeaderPair(ParsedHeaderPair const &copy)
+        : mName(copy.mName)
+        , mValue(copy.mValue)
+    {
+    }
+
+    nsDependentCSubstring mName;
+    nsDependentCSubstring mValue;
+};
+
+class ParsedHeaderValueList
+{
+public:
+    ParsedHeaderValueList(char *t, uint32_t len);
+    nsTArray<ParsedHeaderPair> mValues;
+
+private:
+    void ParsePair(char *t, uint32_t len);
+    void Tokenize(char *input, uint32_t inputLen, char **token,
+                  uint32_t *tokenLen, bool *foundEquals, char **next);
+};
+
+class ParsedHeaderValueListList
+{
+public:
+    explicit ParsedHeaderValueListList(const nsCString &txt);
+    nsTArray<ParsedHeaderValueList> mValues;
+
+private:
+    nsCString mFull;
+};
+
+
+} // namespace net
 } // namespace mozilla
 
 #endif // nsHttp_h__

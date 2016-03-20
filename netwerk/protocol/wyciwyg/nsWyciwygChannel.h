@@ -10,10 +10,12 @@
 #include "nsString.h"
 #include "nsCOMPtr.h"
 
+#include "nsILoadInfo.h"
 #include "nsIWyciwygChannel.h"
 #include "nsIStreamListener.h"
 #include "nsICacheEntryOpenCallback.h"
 #include "PrivateBrowsingChannel.h"
+#include "mozilla/BasePrincipal.h"
 
 class nsICacheEntry;
 class nsIEventTarget;
@@ -24,14 +26,14 @@ class nsIOutputStream;
 class nsIProgressEventSink;
 class nsIURI;
 
-extern PRLogModuleInfo * gWyciwygLog;
+extern mozilla::LazyLogModule gWyciwygLog;
 
 //-----------------------------------------------------------------------------
 
-class nsWyciwygChannel: public nsIWyciwygChannel,
-                        public nsIStreamListener,
-                        public nsICacheEntryOpenCallback,
-                        public mozilla::net::PrivateBrowsingChannel<nsWyciwygChannel>
+class nsWyciwygChannel final: public nsIWyciwygChannel,
+                              public nsIStreamListener,
+                              public nsICacheEntryOpenCallback,
+                              public mozilla::net::PrivateBrowsingChannel<nsWyciwygChannel>
 {
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
@@ -85,11 +87,11 @@ protected:
     nsCString                           mCharset;
     int64_t                             mContentLength;
     uint32_t                            mLoadFlags;
-    uint32_t                            mAppId;
-    bool                                mInBrowser;
+    mozilla::NeckoOriginAttributes      mOriginAttributes;
     nsCOMPtr<nsIURI>                    mURI;
     nsCOMPtr<nsIURI>                    mOriginalURI;
     nsCOMPtr<nsISupports>               mOwner;
+    nsCOMPtr<nsILoadInfo>               mLoadInfo;
     nsCOMPtr<nsIInterfaceRequestor>     mCallbacks;
     nsCOMPtr<nsIProgressEventSink>      mProgressSink;
     nsCOMPtr<nsILoadGroup>              mLoadGroup;

@@ -8,12 +8,15 @@
 #include "nsContentCreatorFunctions.h"
 #include "nsContentList.h"
 #include "nsContentUtils.h"
+#include "nsCSSPseudoElements.h"
 #include "nsFormControlFrame.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMNode.h"
 #include "nsIFormControl.h"
-#include "nsStyleSet.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
+#include "nsIDocument.h"
 
 using mozilla::dom::Element;
 
@@ -62,7 +65,7 @@ nsColorControlFrame::GetFrameName(nsAString& aResult) const
 nsresult
 nsColorControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 {
-  nsCOMPtr<nsIDocument> doc = mContent->GetCurrentDoc();
+  nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
   mColorContent = doc->CreateHTMLElement(nsGkAtoms::div);
 
   // Mark the element to be native anonymous before setting any attributes.
@@ -71,8 +74,8 @@ nsColorControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   nsresult rv = UpdateColor();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCSSPseudoElements::Type pseudoType = nsCSSPseudoElements::ePseudo_mozColorSwatch;
-  nsRefPtr<nsStyleContext> newStyleContext = PresContext()->StyleSet()->
+  CSSPseudoElementType pseudoType = CSSPseudoElementType::mozColorSwatch;
+  RefPtr<nsStyleContext> newStyleContext = PresContext()->StyleSet()->
     ResolvePseudoElementStyle(mContent->AsElement(), pseudoType,
                               StyleContext(), mColorContent->AsElement());
   if (!aElements.AppendElement(ContentInfo(mColorContent, newStyleContext))) {
@@ -83,10 +86,12 @@ nsColorControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 }
 
 void
-nsColorControlFrame::AppendAnonymousContentTo(nsBaseContentList& aElements,
+nsColorControlFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                               uint32_t aFilter)
 {
-  aElements.MaybeAppendElement(mColorContent);
+  if (mColorContent) {
+    aElements.AppendElement(mColorContent);
+  }
 }
 
 nsresult
@@ -132,9 +137,9 @@ nsColorControlFrame::GetContentInsertionFrame()
 }
 
 Element*
-nsColorControlFrame::GetPseudoElement(nsCSSPseudoElements::Type aType)
+nsColorControlFrame::GetPseudoElement(CSSPseudoElementType aType)
 {
-  if (aType == nsCSSPseudoElements::ePseudo_mozColorSwatch) {
+  if (aType == CSSPseudoElementType::mozColorSwatch) {
     return mColorContent;
   }
 

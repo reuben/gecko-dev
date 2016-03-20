@@ -1,4 +1,4 @@
-const A = 3;
+var G = 3;
 
 const Cu = Components.utils;
 
@@ -20,7 +20,7 @@ function run_test()
 
   do_check_eq(a, 3);
   do_check_eq(b, 3);
-  do_check_eq(c, 3);
+  // c is a lexical binding and does not write to the global prototype
   do_check_eq(d, 3);
   do_check_eq(e(), 3);
 
@@ -35,6 +35,10 @@ function run_test()
   do_check_eq(Cu.evalInSandbox("q", s), 3);
   Cu.evalInSandbox("q = 12", s);
   do_check_eq(q, 12);
+
+  do_check_eq(Cu.evalInSandbox("G", s), 3);
+  Cu.evalInSandbox("G = 12", s);
+  do_check_eq(G, 12);
 
   Cu.evalInSandbox("Object.defineProperty(this, 'x', {enumerable: false, value: 3})", s);
   do_check_eq(Cu.evalInSandbox("x", s), 3);

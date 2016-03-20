@@ -9,15 +9,6 @@
 #include "nsCocoaFeatures.h"
 #import <Cocoa/Cocoa.h>
 
-extern "C" {
-  typedef CFTypeRef CUIRendererRef;
-  void CUIDraw(CUIRendererRef r, CGRect rect, CGContextRef ctx, CFDictionaryRef options, CFDictionaryRef* result);
-}
-
-@interface NSWindow(CoreUIRendererPrivate)
-+ (CUIRendererRef)coreUIRenderer;
-@end
-
 enum ColorName {
   toolbarTopBorderGrey,
   toolbarFillGrey,
@@ -40,9 +31,20 @@ static const int sLionThemeColors[][2] = {
   { 0x59, 0x87 }, // bottom separator line
 };
 
+static const int sYosemiteThemeColors[][2] = {
+  /* { active window, inactive window } */
+  // toolbar:
+  { 0xBD, 0xDF }, // top separator line
+  { 0xD3, 0xF6 }, // fill color
+  { 0xB3, 0xD1 }, // bottom separator line
+};
+
 __attribute__((unused))
 static int NativeGreyColorAsInt(ColorName name, BOOL isMain)
 {
+  if (nsCocoaFeatures::OnYosemiteOrLater())
+    return sYosemiteThemeColors[name][isMain ? 0 : 1];
+
   if (nsCocoaFeatures::OnLionOrLater())
     return sLionThemeColors[name][isMain ? 0 : 1];
 

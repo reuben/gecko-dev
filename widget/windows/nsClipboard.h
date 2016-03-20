@@ -7,11 +7,11 @@
 #define nsClipboard_h__
 
 #include "nsBaseClipboard.h"
+#include "nsIObserver.h"
 #include "nsIURI.h"
 #include <windows.h>
 
 class nsITransferable;
-class nsIClipboardOwner;
 class nsIWidget;
 class nsIFile;
 struct IDataObject;
@@ -23,10 +23,10 @@ struct IDataObject;
 class nsClipboard : public nsBaseClipboard,
                     public nsIObserver
 {
+  virtual ~nsClipboard();
 
 public:
   nsClipboard();
-  virtual ~nsClipboard();
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -35,8 +35,8 @@ public:
 
   // nsIClipboard
   NS_IMETHOD HasDataMatchingFlavors(const char** aFlavorList, uint32_t aLength,
-                                    int32_t aWhichClipboard, bool *_retval); 
-  NS_IMETHOD EmptyClipboard(int32_t aWhichClipboard);
+                                    int32_t aWhichClipboard, bool *_retval) override; 
+  NS_IMETHOD EmptyClipboard(int32_t aWhichClipboard) override;
 
   // Internal Native Routines
   static nsresult CreateNativeDataObject(nsITransferable * aTransferable, 
@@ -56,14 +56,15 @@ public:
   static UINT     CF_HTML;
   
 protected:
-  NS_IMETHOD SetNativeClipboardData ( int32_t aWhichClipboard );
-  NS_IMETHOD GetNativeClipboardData ( nsITransferable * aTransferable, int32_t aWhichClipboard );
+  NS_IMETHOD SetNativeClipboardData ( int32_t aWhichClipboard ) override;
+  NS_IMETHOD GetNativeClipboardData ( nsITransferable * aTransferable, int32_t aWhichClipboard ) override;
   
   static bool IsInternetShortcut ( const nsAString& inFileName ) ;
   static bool FindURLFromLocalFile ( IDataObject* inDataObject, UINT inIndex, void** outData, uint32_t* outDataLen ) ;
   static bool FindURLFromNativeURL ( IDataObject* inDataObject, UINT inIndex, void** outData, uint32_t* outDataLen ) ;
   static bool FindUnicodeFromPlainText ( IDataObject* inDataObject, UINT inIndex, void** outData, uint32_t* outDataLen ) ;
-  static bool FindPlatformHTML ( IDataObject* inDataObject, UINT inIndex, void** outData, uint32_t* outDataLen );
+  static bool FindPlatformHTML ( IDataObject* inDataObject, UINT inIndex, void** outData,
+                                 uint32_t* outStartOfData, uint32_t* outDataLen );
   static void ResolveShortcut ( nsIFile* inFileName, nsACString& outURL ) ;
 
   nsIWidget         * mWindow;

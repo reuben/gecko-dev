@@ -7,7 +7,8 @@
 #include "nsIFormControl.h"
 #include "nsGkAtoms.h"
 #include "nsAutoPtr.h"
-#include "nsStyleSet.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "nsContentUtils.h"
 // MouseEvent suppression in PP
 #include "nsContentList.h"
@@ -69,10 +70,12 @@ nsGfxButtonControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements
 }
 
 void
-nsGfxButtonControlFrame::AppendAnonymousContentTo(nsBaseContentList& aElements,
+nsGfxButtonControlFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
                                                   uint32_t aFilter)
 {
-  aElements.MaybeAppendElement(mTextContent);
+  if (mTextContent) {
+    aElements.AppendElement(mTextContent);
+  }
 }
 
 // Create the text content used as label for the button.
@@ -86,7 +89,7 @@ nsGfxButtonControlFrame::CreateFrameFor(nsIContent*      aContent)
     nsContainerFrame* parentFrame = do_QueryFrame(mFrames.FirstChild());
 
     nsPresContext* presContext = PresContext();
-    nsRefPtr<nsStyleContext> textStyleContext;
+    RefPtr<nsStyleContext> textStyleContext;
     textStyleContext = presContext->StyleSet()->
       ResolveStyleForNonElement(mStyleContext);
 

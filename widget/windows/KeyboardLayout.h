@@ -13,6 +13,7 @@
 #include "nsWindowDefs.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/TextEventDispatcher.h"
 #include <windows.h>
 
 #define NS_NUM_OF_KEYS          70
@@ -37,7 +38,6 @@
 #define VK_OEM_CLEAR            0xFE
 
 class nsIIdleServiceInternal;
-struct nsModifierKeyState;
 
 namespace mozilla {
 namespace widget {
@@ -62,24 +62,27 @@ public:
   ModifierKeyState(bool aIsShiftDown, bool aIsControlDown, bool aIsAltDown);
   ModifierKeyState(Modifiers aModifiers);
 
-  MOZ_ALWAYS_INLINE void Update();
+  void Update();
 
-  MOZ_ALWAYS_INLINE void Unset(Modifiers aRemovingModifiers);
+  void Unset(Modifiers aRemovingModifiers);
   void Set(Modifiers aAddingModifiers);
 
   void InitInputEvent(WidgetInputEvent& aInputEvent) const;
 
   bool IsShift() const;
   bool IsControl() const;
-  MOZ_ALWAYS_INLINE bool IsAlt() const;
-  MOZ_ALWAYS_INLINE bool IsAltGr() const;
-  MOZ_ALWAYS_INLINE bool IsWin() const;
+  bool IsAlt() const;
+  bool IsAltGr() const;
+  bool IsWin() const;
 
-  MOZ_ALWAYS_INLINE bool IsCapsLocked() const;
-  MOZ_ALWAYS_INLINE bool IsNumLocked() const;
-  MOZ_ALWAYS_INLINE bool IsScrollLocked() const;
+  bool IsCapsLocked() const;
+  bool IsNumLocked() const;
+  bool IsScrollLocked() const;
 
-  MOZ_ALWAYS_INLINE Modifiers GetModifiers() const;
+  MOZ_ALWAYS_INLINE Modifiers GetModifiers() const
+  {
+    return mModifiers;
+  }
 
 private:
   Modifiers mModifiers;
@@ -234,7 +237,7 @@ public:
   };
 
   NativeKey(nsWindowBase* aWidget,
-            const MSG& aKeyOrCharMessage,
+            const MSG& aMessage,
             const ModifierKeyState& aModKeyState,
             nsTArray<FakeCharMsg>* aFakeCharMsgs = nullptr);
 
@@ -260,8 +263,22 @@ public:
    */
   bool HandleKeyUpMessage(bool* aEventDispatched = nullptr) const;
 
+  /**
+   * Handles WM_APPCOMMAND message.  Returns true if the event is consumed.
+   * Otherwise, false.
+   */
+  bool HandleAppCommandMessage() const;
+
+  /**
+   * Callback of TextEventDispatcherListener::WillDispatchKeyboardEvent().
+   * This method sets alternative char codes of aKeyboardEvent.
+   */
+  void WillDispatchKeyboardEvent(WidgetKeyboardEvent& aKeyboardEvent,
+                                 uint32_t aIndex);
+
 private:
-  nsRefPtr<nsWindowBase> mWidget;
+  RefPtr<nsWindowBase> mWidget;
+  RefPtr<TextEventDispatcher> mDispatcher;
   HKL mKeyboardLayout;
   MSG mMsg;
 
@@ -283,6 +300,26 @@ private:
   // indicates both the dead characters and the base characters.
   UniCharsAndModifiers mCommittedCharsAndModifiers;
 
+  // Following strings are computed by
+  // ComputeInputtingStringWithKeyboardLayout() which is typically called
+  // before dispatching keydown event.
+  // mInputtingStringAndModifiers's string is the string to be
+  // inputted into the focused editor and its modifier state is proper
+  // modifier state for inputting the string into the editor.
+  UniCharsAndModifiers mInputtingStringAndModifiers;
+  // mShiftedString is the string to be inputted into the editor with
+  // current modifier state with active shift state.
+  UniCharsAndModifiers mShiftedString;
+  // mUnshiftedString is the string to be inputted into the editor with
+  // current modifier state without shift state.
+  UniCharsAndModifiers mUnshiftedString;
+  // Following integers are computed by
+  // ComputeInputtingStringWithKeyboardLayout() which is typically called
+  // before dispatching keydown event.  The meaning of these values is same
+  // as charCode.
+  uint32_t mShiftedLatinChar;
+  uint32_t mUnshiftedLatinChar;
+
   WORD    mScanCode;
   bool    mIsExtended;
   bool    mIsDeadKey;
@@ -294,10 +331,18 @@ private:
 
   nsTArray<FakeCharMsg>* mFakeCharMsgs;
 
+  // When a keydown event is dispatched at handling WM_APPCOMMAND, the computed
+  // virtual keycode is set to this.  Even if we consume WM_APPCOMMAND message,
+  // Windows may send WM_KEYDOWN and WM_KEYUP message for them.
+  // At that time, we should not dispatch key events for them.
+  static uint8_t sDispatchedKeyOfAppCommand;
+
   NativeKey()
   {
     MOZ_CRASH("The default constructor of NativeKey isn't available");
   }
+
+  void InitWithAppCommand();
 
   /**
    * Returns true if the key event is caused by auto repeat.
@@ -312,6 +357,21 @@ private:
       case WM_DEADCHAR:
       case WM_SYSDEADCHAR:
         return ((mMsg.lParam & (1 << 30)) != 0);
+      case WM_APPCOMMAND:
+        if (mVirtualKeyCode) {
+          // If we can map the WM_APPCOMMAND to a virtual keycode, we can trust
+          // the result of GetKeyboardState().
+          BYTE kbdState[256];
+          memset(kbdState, 0, sizeof(kbdState));
+          ::GetKeyboardState(kbdState);
+          return !!kbdState[mVirtualKeyCode];
+        }
+        // If there is no virtual keycode for the command, we dispatch both
+        // keydown and keyup events from WM_APPCOMMAND handler.  Therefore,
+        // even if WM_APPCOMMAND is caused by auto key repeat, web apps receive
+        // a pair of DOM keydown and keyup events.  I.e., KeyboardEvent.repeat
+        // should be never true of such keys.
+        return false;
       default:
         return false;
     }
@@ -410,22 +470,24 @@ private:
   /**
    * Initializes the aKeyEvent with the information stored in the instance.
    */
-  void InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
-                    const ModifierKeyState& aModKeyState) const;
-  void InitKeyEvent(WidgetKeyboardEvent& aKeyEvent) const;
+  nsEventStatus InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
+                             const ModifierKeyState& aModKeyState,
+                             const MSG* aMsgSentToPlugin = nullptr) const;
+  nsEventStatus InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
+                             const MSG* aMsgSentToPlugin = nullptr) const;
 
   /**
-   * Dispatches the key event.  Returns true if the event is consumed.
-   * Otherwise, false.
+   * Dispatches a command event for aEventCommand.
+   * Returns true if the event is consumed.  Otherwise, false.
    */
-  bool DispatchKeyEvent(WidgetKeyboardEvent& aKeyEvent,
-                        const MSG* aMsgSentToPlugin = nullptr) const;
+  bool DispatchCommandEvent(uint32_t aEventCommand) const;
 
   /**
-   * DispatchKeyPressEventsWithKeyboardLayout() dispatches keypress event(s)
-   * with the information provided by KeyboardLayout class.
+   * DispatchKeyPressEventsWithoutCharMessage() dispatches keypress event(s)
+   * without char messages.  So, this should be used only when there are no
+   * following char messages.
    */
-  bool DispatchKeyPressEventsWithKeyboardLayout() const;
+  bool DispatchKeyPressEventsWithoutCharMessage() const;
 
   /**
    * Remove all following WM_CHAR, WM_SYSCHAR and WM_DEADCHAR messages for the
@@ -450,6 +512,13 @@ private:
    * or Backspace.
    */
   bool NeedsToHandleWithoutFollowingCharMessages() const;
+
+  /**
+   * ComputeInputtingStringWithKeyboardLayout() computes string to be inputted
+   * with the key and the modifier state, without shift state and with shift
+   * state.
+   */
+  void ComputeInputtingStringWithKeyboardLayout();
 };
 
 class KeyboardLayout
@@ -606,14 +675,14 @@ public:
   /*
    * If a window receives WM_KEYDOWN message or WM_SYSKEYDOWM message which is
    * a redirected message, NativeKey::DispatchKeyDownAndKeyPressEvent()
-   * prevents to dispatch NS_KEY_DOWN event because it has been dispatched
+   * prevents to dispatch eKeyDown event because it has been dispatched
    * before the message was redirected.  However, in some cases, WM_*KEYDOWN
    * message handler may not handle actually.  Then, the message handler needs
    * to forget the redirected message and remove WM_CHAR message or WM_SYSCHAR
    * message for the redirected keydown message.  AutoFlusher class is a helper
    * class for doing it.  This must be created in the stack.
    */
-  class MOZ_STACK_CLASS AutoFlusher MOZ_FINAL
+  class MOZ_STACK_CLASS AutoFlusher final
   {
   public:
     AutoFlusher(nsWindowBase* aWidget, const MSG &aMsg) :
@@ -639,7 +708,7 @@ public:
 
   private:
     bool mCancel;
-    nsRefPtr<nsWindowBase> mWidget;
+    RefPtr<nsWindowBase> mWidget;
     const MSG &mMsg;
   };
 

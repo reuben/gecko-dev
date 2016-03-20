@@ -28,6 +28,7 @@ const EVENT_TEXT_INSERTED = nsIAccessibleEvent.EVENT_TEXT_INSERTED;
 const EVENT_TEXT_REMOVED = nsIAccessibleEvent.EVENT_TEXT_REMOVED;
 const EVENT_TEXT_SELECTION_CHANGED = nsIAccessibleEvent.EVENT_TEXT_SELECTION_CHANGED;
 const EVENT_VALUE_CHANGE = nsIAccessibleEvent.EVENT_VALUE_CHANGE;
+const EVENT_TEXT_VALUE_CHANGE = nsIAccessibleEvent.EVENT_TEXT_VALUE_CHANGE;
 const EVENT_VIRTUALCURSOR_CHANGED = nsIAccessibleEvent.EVENT_VIRTUALCURSOR_CHANGED;
 
 const kNotFromUserInput = 0;
@@ -344,10 +345,17 @@ function eventQueue(aEventType)
                 var msg = "Test with ID = '" + this.getEventID(checker) +
                   "' succeed. ";
 
-                if (checker.unexpected)
-                  ok(true, msg + "There's no unexpected " + typeStr + " event.");
-                else
+                if (checker.unexpected) {
+                  if (checker.todo) {
+                    todo(false, "Event " + typeStr + " event is still missing");
+                  }
+                  else {
+                    ok(true, msg + "There's no unexpected " + typeStr + " event.");
+                  }
+                }
+                else {
                   ok(true, msg + "Event " + typeStr + " was handled.");
+                }
               }
             }
           }
@@ -370,8 +378,13 @@ function eventQueue(aEventType)
                 ok(false, msg + "Dupe " + typeStr + " event.");
 
               if (checker.unexpected) {
-                if (checker.wasCaught)
+                if (checker.todo) {
+                  todo(checker.wasCaught,
+                       "Event " + typeStr + " event is still missing");
+                }
+                else if (checker.wasCaught) {
                   ok(false, msg + "There's unexpected " + typeStr + " event.");
+                }
               } else if (!checker.wasCaught) {
                 ok(false, msg + typeStr + " event was missed.");
               }
@@ -389,7 +402,7 @@ function eventQueue(aEventType)
 
       var res = this.onFinish();
       if (res != DO_NOT_FINISH_TEST)
-        SimpleTest.finish();
+        SimpleTest.executeSoon(SimpleTest.finish);
 
       return;
     }
@@ -1667,6 +1680,18 @@ function invokerChecker(aEventType, aTargetOrFunc, aTargetFuncArg, aIsAsync)
 }
 
 /**
+ * Generic invoker checker for todo events.
+ */
+function todo_invokerChecker(aEventType, aTargetOrFunc, aTargetFuncArg)
+{
+  this.__proto__ = new invokerChecker(aEventType, aTargetOrFunc,
+                                      aTargetFuncArg, true);
+
+  this.unexpected = true;
+  this.todo = true;
+}
+
+/**
  * Generic invoker checker for unexpected events.
  */
 function unexpectedInvokerChecker(aEventType, aTargetOrFunc, aTargetFuncArg)
@@ -1743,10 +1768,11 @@ function textChangeChecker(aID, aStart, aEnd, aTextOrFunc, aIsInserted, aFromUse
 /**
  * Caret move events checker.
  */
-function caretMoveChecker(aCaretOffset, aTargetOrFunc, aTargetFuncArg)
+function caretMoveChecker(aCaretOffset, aTargetOrFunc, aTargetFuncArg,
+                          aIsAsync)
 {
   this.__proto__ = new invokerChecker(EVENT_TEXT_CARET_MOVED,
-                                      aTargetOrFunc, aTargetFuncArg);
+                                      aTargetOrFunc, aTargetFuncArg, aIsAsync);
 
   this.check = function caretMoveChecker_check(aEvent)
   {
@@ -1754,6 +1780,12 @@ function caretMoveChecker(aCaretOffset, aTargetOrFunc, aTargetFuncArg)
        aCaretOffset,
        "Wrong caret offset for " + prettyName(aEvent.accessible));
   }
+}
+
+function asyncCaretMoveChecker(aCaretOffset, aTargetOrFunc, aTargetFuncArg)
+{
+  this.__proto__ = new caretMoveChecker(aCaretOffset, aTargetOrFunc,
+                                        aTargetFuncArg, true);
 }
 
 /**
@@ -1771,6 +1803,43 @@ function textSelectionChecker(aID, aStartOffset, aEndOffset)
       testTextGetSelection(aID, aStartOffset, aEndOffset, 0);
     }
   }
+}
+
+/**
+ * Object attribute changed checker
+ */
+function objAttrChangedChecker(aID, aAttr)
+{
+  this.__proto__ = new invokerChecker(EVENT_OBJECT_ATTRIBUTE_CHANGED, aID);
+
+  this.check = function objAttrChangedChecker_check(aEvent)
+  {
+    var event = null;
+    try {
+      var event = aEvent.QueryInterface(
+        nsIAccessibleObjectAttributeChangedEvent);
+    } catch (e) {
+      ok(false, "Object attribute changed event was expected");
+    }
+
+    if (!event) {
+      return;
+    }
+
+    is(event.changedAttribute.toString(), aAttr,
+      "Wrong attribute name of the object attribute changed event.");
+  };
+
+  this.match = function objAttrChangedChecker_match(aEvent)
+  {
+    if (aEvent instanceof nsIAccessibleObjectAttributeChangedEvent) {
+      var scEvent = aEvent.QueryInterface(
+        nsIAccessibleObjectAttributeChangedEvent);
+      return (aEvent.accessible == getAccessible(this.target)) &&
+        (scEvent.changedAttribute.toString() == aAttr);
+    }
+    return false;
+  };
 }
 
 /**

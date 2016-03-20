@@ -17,6 +17,7 @@ class GeckoRuntimeRunner(BaseRunner):
     """
 
     def __init__(self, binary, cmdargs=None, **runner_args):
+        self.show_crash_reporter = runner_args.pop('show_crash_reporter', False)
         BaseRunner.__init__(self, **runner_args)
 
         self.binary = binary
@@ -26,6 +27,10 @@ class GeckoRuntimeRunner(BaseRunner):
         self.env['MOZ_NO_REMOTE'] = '1'
         # keeps Firefox attached to the terminal window after it starts
         self.env['NO_EM_RESTART'] = '1'
+
+        # Disable crash reporting dialogs that interfere with debugging
+        self.env['GNOME_DISABLE_CRASH_DIALOG'] = '1'
+        self.env['XRE_NO_WINDOWS_CRASH_DIALOG'] = '1'
 
         # set the library path if needed on linux
         if sys.platform == 'linux2' and self.binary.endswith('-bin'):
@@ -54,13 +59,6 @@ class GeckoRuntimeRunner(BaseRunner):
         # Bug 775416 - Ensure that binary options are passed in first
         command[1:1] = self.cmdargs
 
-        # If running on OS X 10.5 or older, wrap |cmd| so that it will
-        # be executed as an i386 binary, in case it's a 32-bit/64-bit universal
-        # binary.
-        if mozinfo.isMac and hasattr(platform, 'mac_ver') and \
-                platform.mac_ver()[0][:4] < '10.6':
-            command = ["arch", "-arch", "i386"] + command
-
         if hasattr(self.app_ctx, 'wrap_command'):
             command = self.app_ctx.wrap_command(command)
         return command
@@ -70,5 +68,14 @@ class GeckoRuntimeRunner(BaseRunner):
         if not self.profile.exists():
             self.profile.reset()
             assert self.profile.exists(), "%s : failure to reset profile" % self.__class__.__name__
+
+        has_debugger = "debug_args" in kwargs and kwargs["debug_args"]
+        if has_debugger:
+            self.env["MOZ_CRASHREPORTER_DISABLE"] = "1"
+        else:
+            if not self.show_crash_reporter:
+                # hide the crash reporter window
+                self.env["MOZ_CRASHREPORTER_NO_REPORT"] = "1"
+            self.env["MOZ_CRASHREPORTER"] = "1"
 
         BaseRunner.start(self, *args, **kwargs)

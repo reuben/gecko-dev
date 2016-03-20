@@ -3,37 +3,33 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_LOGGING
-#define FORCE_PR_LOG /* Allow logging in the release build */
-#endif // MOZ_LOGGING
-#include "prlog.h"
+#include "mozilla/Logging.h"
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/MiscEvents.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/WindowsVersion.h"
 
-#include "KeyboardLayout.h"
-#include "nsIMM32Handler.h"
-
-#include "nsMemory.h"
-#include "nsToolkit.h"
-#include "nsQuickSort.h"
 #include "nsAlgorithm.h"
-#include "nsUnicharUtils.h"
-#include "WidgetUtils.h"
-#include "WinUtils.h"
-#include "nsWindowDbg.h"
-#include "nsServiceManagerUtils.h"
-#include "nsPrintfCString.h"
-
-#include "nsIDOMKeyEvent.h"
-#include "nsIIdleServiceInternal.h"
-
 #ifdef MOZ_CRASHREPORTER
 #include "nsExceptionHandler.h"
 #endif
+#include "nsGkAtoms.h"
+#include "nsIDOMKeyEvent.h"
+#include "nsIIdleServiceInternal.h"
+#include "nsMemory.h"
+#include "nsPrintfCString.h"
+#include "nsQuickSort.h"
+#include "nsServiceManagerUtils.h"
+#include "nsToolkit.h"
+#include "nsUnicharUtils.h"
+#include "nsWindowDbg.h"
+
+#include "KeyboardLayout.h"
+#include "WidgetUtils.h"
+#include "WinUtils.h"
 
 #include "npapi.h"
 
@@ -53,7 +49,6 @@
 namespace mozilla {
 namespace widget {
 
-#ifdef PR_LOGGING
 static const char* kVirtualKeyName[] = {
   "NULL", "VK_LBUTTON", "VK_RBUTTON", "VK_CANCEL",
   "VK_MBUTTON", "VK_XBUTTON1", "VK_XBUTTON2", "0x07",
@@ -142,8 +137,6 @@ static const char* kVirtualKeyName[] = {
 
 static_assert(sizeof(kVirtualKeyName) / sizeof(const char*) == 0x100,
   "The virtual key name must be defined just 256 keys");
-
-#endif // #ifdef PR_LOGGING
 
 // Unique id counter associated with a keydown / keypress events. Used in
 // identifing keypress events for removal from async event dispatch queue
@@ -280,12 +273,12 @@ ModifierKeyState::InitInputEvent(WidgetInputEvent& aInputEvent) const
 {
   aInputEvent.modifiers = mModifiers;
 
-  switch(aInputEvent.eventStructType) {
-    case NS_MOUSE_EVENT:
-    case NS_MOUSE_SCROLL_EVENT:
-    case NS_WHEEL_EVENT:
-    case NS_DRAG_EVENT:
-    case NS_SIMPLE_GESTURE_EVENT:
+  switch(aInputEvent.mClass) {
+    case eMouseEventClass:
+    case eMouseScrollEventClass:
+    case eWheelEventClass:
+    case eDragEventClass:
+    case eSimpleGestureEventClass:
       InitMouseEvent(aInputEvent);
       break;
     default:
@@ -296,16 +289,11 @@ ModifierKeyState::InitInputEvent(WidgetInputEvent& aInputEvent) const
 void
 ModifierKeyState::InitMouseEvent(WidgetInputEvent& aMouseEvent) const
 {
-  NS_ASSERTION(aMouseEvent.eventStructType == NS_MOUSE_EVENT ||
-               aMouseEvent.eventStructType == NS_WHEEL_EVENT ||
-               aMouseEvent.eventStructType == NS_DRAG_EVENT ||
-               aMouseEvent.eventStructType == NS_SIMPLE_GESTURE_EVENT,
+  NS_ASSERTION(aMouseEvent.mClass == eMouseEventClass ||
+               aMouseEvent.mClass == eWheelEventClass ||
+               aMouseEvent.mClass == eDragEventClass ||
+               aMouseEvent.mClass == eSimpleGestureEventClass,
                "called with non-mouse event");
-
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
-    // Buttons for immersive mode are handled in MetroInput.
-    return;
-  }
 
   WidgetMouseEventBase& mouseEvent = *aMouseEvent.AsMouseEventBase();
   mouseEvent.buttons = 0;
@@ -372,12 +360,6 @@ bool
 ModifierKeyState::IsScrollLocked() const
 {
   return (mModifiers & MODIFIER_SCROLLLOCK) != 0;
-}
-
-Modifiers
-ModifierKeyState::GetModifiers() const
-{
-  return mModifiers;
 }
 
 void
@@ -606,7 +588,7 @@ UniCharsAndModifiers
 VirtualKey::GetNativeUniChars(ShiftState aShiftState) const
 {
 #ifdef DEBUG
-  if (aShiftState < 0 || aShiftState >= ArrayLength(mShiftStates)) {
+  if (aShiftState >= ArrayLength(mShiftStates)) {
     nsPrintfCString warning("Shift state is out of range: "
                             "aShiftState=%d, ArrayLength(mShiftState)=%d",
                             aShiftState, ArrayLength(mShiftStates));
@@ -672,18 +654,39 @@ VirtualKey::FillKbdState(PBYTE aKbdState,
  * mozilla::widget::NativeKey
  *****************************************************************************/
 
+uint8_t NativeKey::sDispatchedKeyOfAppCommand = 0;
+
 NativeKey::NativeKey(nsWindowBase* aWidget,
-                     const MSG& aKeyOrCharMessage,
+                     const MSG& aMessage,
                      const ModifierKeyState& aModKeyState,
-                     nsTArray<FakeCharMsg>* aFakeCharMsgs) :
-  mWidget(aWidget), mMsg(aKeyOrCharMessage), mDOMKeyCode(0),
-  mModKeyState(aModKeyState), mVirtualKeyCode(0), mOriginalVirtualKeyCode(0),
-  mFakeCharMsgs(aFakeCharMsgs && aFakeCharMsgs->Length() ?
-                  aFakeCharMsgs : nullptr)
+                     nsTArray<FakeCharMsg>* aFakeCharMsgs)
+  : mWidget(aWidget)
+  , mDispatcher(aWidget->GetTextEventDispatcher())
+  , mMsg(aMessage)
+  , mDOMKeyCode(0)
+  , mKeyNameIndex(KEY_NAME_INDEX_Unidentified)
+  , mCodeNameIndex(CODE_NAME_INDEX_UNKNOWN)
+  , mModKeyState(aModKeyState)
+  , mVirtualKeyCode(0)
+  , mOriginalVirtualKeyCode(0)
+  , mShiftedLatinChar(0)
+  , mUnshiftedLatinChar(0)
+  , mScanCode(0)
+  , mIsExtended(false)
+  , mIsDeadKey(false)
+  , mFakeCharMsgs(aFakeCharMsgs && aFakeCharMsgs->Length() ?
+                    aFakeCharMsgs : nullptr)
 {
   MOZ_ASSERT(aWidget);
+  MOZ_ASSERT(mDispatcher);
   KeyboardLayout* keyboardLayout = KeyboardLayout::GetInstance();
   mKeyboardLayout = keyboardLayout->GetLayout();
+
+  if (mMsg.message == WM_APPCOMMAND) {
+    InitWithAppCommand();
+    return;
+  }
+
   mScanCode = WinUtils::GetScanCode(mMsg.lParam);
   mIsExtended = WinUtils::IsExtendedScanCode(mMsg.lParam);
   switch (mMsg.message) {
@@ -856,6 +859,110 @@ NativeKey::NativeKey(nsWindowBase* aWidget,
     (IsFollowedByDeadCharMessage() ||
      keyboardLayout->IsDeadKey(mOriginalVirtualKeyCode, mModKeyState));
   mIsPrintableKey = KeyboardLayout::IsPrintableCharKey(mOriginalVirtualKeyCode);
+
+  // Compute some strings which may be inputted by the key with various
+  // modifier state if this key event won't cause text input actually.
+  // They will be used for setting alternativeCharCodes in the callback
+  // method which will be called by TextEventDispatcher.
+  if (IsKeyDownMessage() && NeedsToHandleWithoutFollowingCharMessages()) {
+    ComputeInputtingStringWithKeyboardLayout();
+  }
+}
+
+void
+NativeKey::InitWithAppCommand()
+{
+  if (GET_DEVICE_LPARAM(mMsg.lParam) != FAPPCOMMAND_KEY) {
+    return;
+  }
+
+  uint32_t appCommand = GET_APPCOMMAND_LPARAM(mMsg.lParam);
+  switch (GET_APPCOMMAND_LPARAM(mMsg.lParam)) {
+
+#undef NS_APPCOMMAND_TO_DOM_KEY_NAME_INDEX
+#define NS_APPCOMMAND_TO_DOM_KEY_NAME_INDEX(aAppCommand, aKeyNameIndex) \
+    case aAppCommand: \
+      mKeyNameIndex = aKeyNameIndex; \
+      break;
+
+#include "NativeKeyToDOMKeyName.h"
+
+#undef NS_APPCOMMAND_TO_DOM_KEY_NAME_INDEX
+
+    default:
+      mKeyNameIndex = KEY_NAME_INDEX_Unidentified;
+  }
+
+  // Guess the virtual keycode which caused this message.
+  switch (appCommand) {
+    case APPCOMMAND_BROWSER_BACKWARD:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_BACK;
+      break;
+    case APPCOMMAND_BROWSER_FORWARD:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_FORWARD;
+      break;
+    case APPCOMMAND_BROWSER_REFRESH:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_REFRESH;
+      break;
+    case APPCOMMAND_BROWSER_STOP:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_STOP;
+      break;
+    case APPCOMMAND_BROWSER_SEARCH:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_SEARCH;
+      break;
+    case APPCOMMAND_BROWSER_FAVORITES:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_FAVORITES;
+      break;
+    case APPCOMMAND_BROWSER_HOME:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_BROWSER_HOME;
+      break;
+    case APPCOMMAND_VOLUME_MUTE:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_VOLUME_MUTE;
+      break;
+    case APPCOMMAND_VOLUME_DOWN:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_VOLUME_DOWN;
+      break;
+    case APPCOMMAND_VOLUME_UP:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_VOLUME_UP;
+      break;
+    case APPCOMMAND_MEDIA_NEXTTRACK:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_MEDIA_NEXT_TRACK;
+      break;
+    case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_MEDIA_PREV_TRACK;
+      break;
+    case APPCOMMAND_MEDIA_STOP:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_MEDIA_STOP;
+      break;
+    case APPCOMMAND_MEDIA_PLAY_PAUSE:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_MEDIA_PLAY_PAUSE;
+      break;
+    case APPCOMMAND_LAUNCH_MAIL:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_LAUNCH_MAIL;
+      break;
+    case APPCOMMAND_LAUNCH_MEDIA_SELECT:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_LAUNCH_MEDIA_SELECT;
+      break;
+    case APPCOMMAND_LAUNCH_APP1:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_LAUNCH_APP1;
+      break;
+    case APPCOMMAND_LAUNCH_APP2:
+      mVirtualKeyCode = mOriginalVirtualKeyCode = VK_LAUNCH_APP2;
+      break;
+    default:
+      return;
+  }
+
+  uint16_t scanCodeEx = ComputeScanCodeExFromVirtualKeyCode(mVirtualKeyCode);
+  mScanCode = static_cast<uint8_t>(scanCodeEx & 0xFF);
+  uint8_t extended = static_cast<uint8_t>((scanCodeEx & 0xFF00) >> 8);
+  mIsExtended = (extended == 0xE0) || (extended == 0xE1);
+  mDOMKeyCode =
+    KeyboardLayout::GetInstance()->
+      ConvertNativeKeyCodeToDOMKeyCode(mOriginalVirtualKeyCode);
+  mCodeNameIndex =
+    KeyboardLayout::ConvertScanCodeToCodeNameIndex(
+      GetScanCodeWithExtendedFlag());
 }
 
 bool
@@ -1035,27 +1142,33 @@ NativeKey::ComputeUnicharFromScanCode() const
                              MAPVK_VK_TO_CHAR, mKeyboardLayout));
 }
 
-void
-NativeKey::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent) const
+nsEventStatus
+NativeKey::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
+                        const MSG* aMsgSentToPlugin) const
 {
-  InitKeyEvent(aKeyEvent, mModKeyState);
+  return InitKeyEvent(aKeyEvent, mModKeyState, aMsgSentToPlugin);
 }
 
-void
+nsEventStatus
 NativeKey::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
-                        const ModifierKeyState& aModKeyState) const
+                        const ModifierKeyState& aModKeyState,
+                        const MSG* aMsgSentToPlugin) const
 {
-  nsIntPoint point(0, 0);
+  if (mWidget->Destroyed()) {
+    MOZ_CRASH("NativeKey tries to dispatch a key event on destroyed widget");
+  }
+
+  LayoutDeviceIntPoint point(0, 0);
   mWidget->InitEvent(aKeyEvent, &point);
 
-  switch (aKeyEvent.message) {
-    case NS_KEY_DOWN:
+  switch (aKeyEvent.mMessage) {
+    case eKeyDown:
       aKeyEvent.keyCode = mDOMKeyCode;
       // Unique id for this keydown event and its associated keypress.
       sUniqueKeyEventId++;
       aKeyEvent.mUniqueId = sUniqueKeyEventId;
       break;
-    case NS_KEY_UP:
+    case eKeyUp:
       aKeyEvent.keyCode = mDOMKeyCode;
       // Set defaultPrevented of the key event if the VK_MENU is not a system
       // key release, so that the menu bar does not trigger.  This helps avoid
@@ -1065,7 +1178,7 @@ NativeKey::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
       aKeyEvent.mFlags.mDefaultPrevented =
         (mOriginalVirtualKeyCode == VK_MENU && mMsg.message != WM_SYSKEYUP);
       break;
-    case NS_KEY_PRESS:
+    case eKeyPress:
       aKeyEvent.mUniqueId = sUniqueKeyEventId;
       break;
     default:
@@ -1081,17 +1194,6 @@ NativeKey::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent,
   MOZ_ASSERT(mCodeNameIndex != CODE_NAME_INDEX_USE_STRING);
   aKeyEvent.location = GetKeyLocation();
   aModKeyState.InitInputEvent(aKeyEvent);
-}
-
-bool
-NativeKey::DispatchKeyEvent(WidgetKeyboardEvent& aKeyEvent,
-                            const MSG* aMsgSentToPlugin) const
-{
-  if (mWidget->Destroyed()) {
-    MOZ_CRASH("NativeKey tries to dispatch a key event on destroyed widget");
-  }
-
-  KeyboardLayout::NotifyIdleServiceOfUserActivity();
 
   NPEvent pluginEvent;
   if (aMsgSentToPlugin &&
@@ -1099,10 +1201,226 @@ NativeKey::DispatchKeyEvent(WidgetKeyboardEvent& aKeyEvent,
     pluginEvent.event = aMsgSentToPlugin->message;
     pluginEvent.wParam = aMsgSentToPlugin->wParam;
     pluginEvent.lParam = aMsgSentToPlugin->lParam;
-    aKeyEvent.pluginEvent = static_cast<void*>(&pluginEvent);
+    aKeyEvent.mPluginEvent.Copy(pluginEvent);
   }
 
-  return (mWidget->DispatchKeyboardEvent(&aKeyEvent) || mWidget->Destroyed());
+  KeyboardLayout::NotifyIdleServiceOfUserActivity();
+
+  return aKeyEvent.mFlags.mDefaultPrevented ? nsEventStatus_eConsumeNoDefault :
+                                              nsEventStatus_eIgnore;
+}
+
+bool
+NativeKey::DispatchCommandEvent(uint32_t aEventCommand) const
+{
+  nsCOMPtr<nsIAtom> command;
+  switch (aEventCommand) {
+    case APPCOMMAND_BROWSER_BACKWARD:
+      command = nsGkAtoms::Back;
+      break;
+    case APPCOMMAND_BROWSER_FORWARD:
+      command = nsGkAtoms::Forward;
+      break;
+    case APPCOMMAND_BROWSER_REFRESH:
+      command = nsGkAtoms::Reload;
+      break;
+    case APPCOMMAND_BROWSER_STOP:
+      command = nsGkAtoms::Stop;
+      break;
+    case APPCOMMAND_BROWSER_SEARCH:
+      command = nsGkAtoms::Search;
+      break;
+    case APPCOMMAND_BROWSER_FAVORITES:
+      command = nsGkAtoms::Bookmarks;
+      break;
+    case APPCOMMAND_BROWSER_HOME:
+      command = nsGkAtoms::Home;
+      break;
+    case APPCOMMAND_CLOSE:
+      command = nsGkAtoms::Close;
+      break;
+    case APPCOMMAND_FIND:
+      command = nsGkAtoms::Find;
+      break;
+    case APPCOMMAND_HELP:
+      command = nsGkAtoms::Help;
+      break;
+    case APPCOMMAND_NEW:
+      command = nsGkAtoms::New;
+      break;
+    case APPCOMMAND_OPEN:
+      command = nsGkAtoms::Open;
+      break;
+    case APPCOMMAND_PRINT:
+      command = nsGkAtoms::Print;
+      break;
+    case APPCOMMAND_SAVE:
+      command = nsGkAtoms::Save;
+      break;
+    case APPCOMMAND_FORWARD_MAIL:
+      command = nsGkAtoms::ForwardMail;
+      break;
+    case APPCOMMAND_REPLY_TO_MAIL:
+      command = nsGkAtoms::ReplyToMail;
+      break;
+    case APPCOMMAND_SEND_MAIL:
+      command = nsGkAtoms::SendMail;
+      break;
+    case APPCOMMAND_MEDIA_NEXTTRACK:
+      command = nsGkAtoms::NextTrack;
+      break;
+    case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+      command = nsGkAtoms::PreviousTrack;
+      break;
+    case APPCOMMAND_MEDIA_STOP:
+      command = nsGkAtoms::MediaStop;
+      break;
+    case APPCOMMAND_MEDIA_PLAY_PAUSE:
+      command = nsGkAtoms::PlayPause;
+      break;
+    default:
+      return false;
+  }
+  WidgetCommandEvent commandEvent(true, nsGkAtoms::onAppCommand,
+                                  command, mWidget);
+
+  mWidget->InitEvent(commandEvent);
+  return (mWidget->DispatchWindowEvent(&commandEvent) || mWidget->Destroyed());
+}
+
+bool
+NativeKey::HandleAppCommandMessage() const
+{
+  // NOTE: Typical behavior of WM_APPCOMMAND caused by key is, WM_APPCOMMAND
+  //       message is _sent_ first.  Then, the DefaultWndProc will _post_
+  //       WM_KEYDOWN message and WM_KEYUP message if the keycode for the
+  //       command is available (i.e., mVirtualKeyCode is not 0).
+
+  // NOTE: IntelliType (Microsoft's keyboard utility software) always consumes
+  //       WM_KEYDOWN and WM_KEYUP.
+
+  // Let's dispatch keydown message before our chrome handles the command
+  // when the message is caused by a keypress.  This behavior makes handling
+  // WM_APPCOMMAND be a default action of the keydown event.  This means that
+  // web applications can handle multimedia keys and prevent our default action.
+  // This allow web applications to provide better UX for multimedia keyboard
+  // users.
+  bool dispatchKeyEvent = (GET_DEVICE_LPARAM(mMsg.lParam) == FAPPCOMMAND_KEY);
+  if (dispatchKeyEvent) {
+    // If a plug-in window has focus but it didn't consume the message, our
+    // window receive WM_APPCOMMAND message.  In this case, we shouldn't
+    // dispatch KeyboardEvents because an event handler may access the
+    // plug-in process synchronously.
+    dispatchKeyEvent =
+      WinUtils::IsOurProcessWindow(reinterpret_cast<HWND>(mMsg.wParam));
+  }
+
+  bool consumed = false;
+
+  if (dispatchKeyEvent) {
+    nsresult rv = mDispatcher->BeginNativeInputTransaction();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return true;
+    }
+    WidgetKeyboardEvent keydownEvent(true, eKeyDown, mWidget);
+    nsEventStatus status = InitKeyEvent(keydownEvent, mModKeyState, &mMsg);
+    // NOTE: If the keydown event is consumed by web contents, we shouldn't
+    //       continue to handle the command.
+    if (!mDispatcher->DispatchKeyboardEvent(eKeyDown, keydownEvent, status,
+                                            const_cast<NativeKey*>(this))) {
+      // If keyboard event wasn't fired, there must be composition.
+      // So, we don't need to dispatch a command event.
+      return true;
+    }
+    consumed = status == nsEventStatus_eConsumeNoDefault;
+    sDispatchedKeyOfAppCommand = mVirtualKeyCode;
+    if (mWidget->Destroyed()) {
+      return true;
+    }
+  }
+
+  // Dispatch a command event or a content command event if the command is
+  // supported.
+  if (!consumed) {
+    uint32_t appCommand = GET_APPCOMMAND_LPARAM(mMsg.lParam);
+    EventMessage contentCommandMessage = eVoidEvent;
+    switch (appCommand) {
+      case APPCOMMAND_BROWSER_BACKWARD:
+      case APPCOMMAND_BROWSER_FORWARD:
+      case APPCOMMAND_BROWSER_REFRESH:
+      case APPCOMMAND_BROWSER_STOP:
+      case APPCOMMAND_BROWSER_SEARCH:
+      case APPCOMMAND_BROWSER_FAVORITES:
+      case APPCOMMAND_BROWSER_HOME:
+      case APPCOMMAND_CLOSE:
+      case APPCOMMAND_FIND:
+      case APPCOMMAND_HELP:
+      case APPCOMMAND_NEW:
+      case APPCOMMAND_OPEN:
+      case APPCOMMAND_PRINT:
+      case APPCOMMAND_SAVE:
+      case APPCOMMAND_FORWARD_MAIL:
+      case APPCOMMAND_REPLY_TO_MAIL:
+      case APPCOMMAND_SEND_MAIL:
+      case APPCOMMAND_MEDIA_NEXTTRACK:
+      case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+      case APPCOMMAND_MEDIA_STOP:
+      case APPCOMMAND_MEDIA_PLAY_PAUSE:
+        // We shouldn't consume the message always because if we don't handle
+        // the message, the sender (typically, utility of keyboard or mouse)
+        // may send other key messages which indicate well known shortcut key.
+        consumed = DispatchCommandEvent(appCommand);
+        break;
+
+      // Use content command for following commands:
+      case APPCOMMAND_COPY:
+        contentCommandMessage = eContentCommandCopy;
+        break;
+      case APPCOMMAND_CUT:
+        contentCommandMessage = eContentCommandCut;
+        break;
+      case APPCOMMAND_PASTE:
+        contentCommandMessage = eContentCommandPaste;
+        break;
+      case APPCOMMAND_REDO:
+        contentCommandMessage = eContentCommandRedo;
+        break;
+      case APPCOMMAND_UNDO:
+        contentCommandMessage = eContentCommandUndo;
+        break;
+    }
+
+    if (contentCommandMessage) {
+      WidgetContentCommandEvent contentCommandEvent(true, contentCommandMessage,
+                                                    mWidget);
+      mWidget->DispatchWindowEvent(&contentCommandEvent);
+      consumed = true;
+    }
+
+    if (mWidget->Destroyed()) {
+      return true;
+    }
+  }
+
+  // Dispatch a keyup event if the command is caused by pressing a key and
+  // the key isn't mapped to a virtual keycode.
+  if (dispatchKeyEvent && !mVirtualKeyCode) {
+    nsresult rv = mDispatcher->BeginNativeInputTransaction();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return true;
+    }
+    WidgetKeyboardEvent keyupEvent(true, eKeyUp, mWidget);
+    nsEventStatus status = InitKeyEvent(keyupEvent, mModKeyState, &mMsg);
+    // NOTE: Ignore if the keyup event is consumed because keyup event
+    //       represents just a physical key event state change.
+    mDispatcher->DispatchKeyboardEvent(eKeyUp, keyupEvent, status,
+                                       const_cast<NativeKey*>(this));
+    if (mWidget->Destroyed()) {
+      return true;
+    }
+  }
+
+  return consumed;
 }
 
 bool
@@ -1114,6 +1432,14 @@ NativeKey::HandleKeyDownMessage(bool* aEventDispatched) const
     *aEventDispatched = false;
   }
 
+  if (sDispatchedKeyOfAppCommand &&
+      sDispatchedKeyOfAppCommand == mOriginalVirtualKeyCode) {
+    // The multimedia key event has already been dispatch from
+    // HandleAppCommandMessage().
+    sDispatchedKeyOfAppCommand = 0;
+    return true;
+  }
+
   bool defaultPrevented = false;
   if (mFakeCharMsgs ||
       !RedirectedKeyDownMessageManager::IsRedirectedMessage(mMsg)) {
@@ -1123,13 +1449,26 @@ NativeKey::HandleKeyDownMessage(bool* aEventDispatched) const
       return false;
     }
 
-    bool isIMEEnabled = WinUtils::IsIMEEnabled(mWidget->GetInputContext());
-    WidgetKeyboardEvent keydownEvent(true, NS_KEY_DOWN, mWidget);
-    InitKeyEvent(keydownEvent, mModKeyState);
-    if (aEventDispatched) {
-      *aEventDispatched = true;
+    nsresult rv = mDispatcher->BeginNativeInputTransaction();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return true;
     }
-    defaultPrevented = DispatchKeyEvent(keydownEvent, &mMsg);
+
+    bool isIMEEnabled = WinUtils::IsIMEEnabled(mWidget->GetInputContext());
+    WidgetKeyboardEvent keydownEvent(true, eKeyDown, mWidget);
+    nsEventStatus status = InitKeyEvent(keydownEvent, mModKeyState, &mMsg);
+    bool dispatched =
+      mDispatcher->DispatchKeyboardEvent(eKeyDown, keydownEvent, status,
+                                         const_cast<NativeKey*>(this));
+    if (aEventDispatched) {
+      *aEventDispatched = dispatched;
+    }
+    if (!dispatched) {
+      // If the keydown event wasn't fired, there must be composition.
+      // we don't need to do anything anymore.
+      return false;
+    }
+    defaultPrevented = status == nsEventStatus_eConsumeNoDefault;
 
     if (mWidget->Destroyed()) {
       return true;
@@ -1185,18 +1524,6 @@ NativeKey::HandleKeyDownMessage(bool* aEventDispatched) const
     return defaultPrevented;
   }
 
-  // Don't dispatch keypress event for modifier keys.
-  switch (mDOMKeyCode) {
-    case NS_VK_SHIFT:
-    case NS_VK_CONTROL:
-    case NS_VK_ALT:
-    case NS_VK_CAPS_LOCK:
-    case NS_VK_NUM_LOCK:
-    case NS_VK_SCROLL_LOCK:
-    case NS_VK_WIN:
-      return defaultPrevented;
-  }
-
   if (defaultPrevented) {
     DispatchPluginEventsAndDiscardsCharMessages();
     return true;
@@ -1206,7 +1533,7 @@ NativeKey::HandleKeyDownMessage(bool* aEventDispatched) const
   // keypress for almost all keys
   if (NeedsToHandleWithoutFollowingCharMessages()) {
     return (DispatchPluginEventsAndDiscardsCharMessages() ||
-            DispatchKeyPressEventsWithKeyboardLayout());
+            DispatchKeyPressEventsWithoutCharMessage());
   }
 
   MSG followingCharMsg;
@@ -1233,7 +1560,7 @@ NativeKey::HandleKeyDownMessage(bool* aEventDispatched) const
     return false;
   }
 
-  return DispatchKeyPressEventsWithKeyboardLayout();
+  return DispatchKeyPressEventsWithoutCharMessage();
 }
 
 bool
@@ -1271,23 +1598,31 @@ NativeKey::HandleCharMessage(const MSG& aCharMsg,
       mModKeyState.IsAltGr() ||
       (mOriginalVirtualKeyCode &&
        !KeyboardLayout::IsPrintableCharKey(mOriginalVirtualKeyCode))) {
-    WidgetKeyboardEvent keypressEvent(true, NS_KEY_PRESS, mWidget);
+    WidgetKeyboardEvent keypressEvent(true, eKeyPress, mWidget);
     if (aCharMsg.wParam >= U_SPACE) {
       keypressEvent.charCode = static_cast<uint32_t>(aCharMsg.wParam);
     } else {
       keypressEvent.keyCode = mDOMKeyCode;
     }
+    nsresult rv = mDispatcher->BeginNativeInputTransaction();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return true;
+    }
+
     // When AltGr (Alt+Ctrl) is pressed, that causes normal text input.
     // At this time, if either alt or ctrl flag is set, nsEditor ignores the
     // keypress event.  For avoiding this issue, we should remove ctrl and alt
     // flags.
     ModifierKeyState modKeyState(mModKeyState);
     modKeyState.Unset(MODIFIER_ALT | MODIFIER_CONTROL);
-    InitKeyEvent(keypressEvent, modKeyState);
+    nsEventStatus status = InitKeyEvent(keypressEvent, modKeyState, &aCharMsg);
+    bool dispatched =
+      mDispatcher->MaybeDispatchKeypressEvents(keypressEvent, status,
+                                               const_cast<NativeKey*>(this));
     if (aEventDispatched) {
-      *aEventDispatched = true;
+      *aEventDispatched = dispatched;
     }
-    return DispatchKeyEvent(keypressEvent, &aCharMsg);
+    return status == nsEventStatus_eConsumeNoDefault;
   }
 
   // XXX It seems that following code was implemented for shortcut key
@@ -1317,7 +1652,6 @@ NativeKey::HandleCharMessage(const MSG& aCharMsg,
   // Bug 50255 and Bug 351310: Keep the characters unshifted for shortcuts and
   // accesskeys and make sure that numbers are always passed as such.
   if (uniChar && (mModKeyState.IsControl() || mModKeyState.IsAlt())) {
-    KeyboardLayout* keyboardLayout = KeyboardLayout::GetInstance();
     char16_t unshiftedCharCode =
       (mVirtualKeyCode >= '0' && mVirtualKeyCode <= '9') ?
         mVirtualKeyCode :  mModKeyState.IsShift() ?
@@ -1336,16 +1670,24 @@ NativeKey::HandleCharMessage(const MSG& aCharMsg,
     uniChar = towlower(uniChar);
   }
 
-  WidgetKeyboardEvent keypressEvent(true, NS_KEY_PRESS, mWidget);
+  nsresult rv = mDispatcher->BeginNativeInputTransaction();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return true;
+  }
+
+  WidgetKeyboardEvent keypressEvent(true, eKeyPress, mWidget);
   keypressEvent.charCode = uniChar;
   if (!keypressEvent.charCode) {
     keypressEvent.keyCode = mDOMKeyCode;
   }
-  InitKeyEvent(keypressEvent, mModKeyState);
+  nsEventStatus status = InitKeyEvent(keypressEvent, mModKeyState, &aCharMsg);
+  bool dispatched =
+    mDispatcher->MaybeDispatchKeypressEvents(keypressEvent, status,
+                                             const_cast<NativeKey*>(this));
   if (aEventDispatched) {
-    *aEventDispatched = true;
+    *aEventDispatched = dispatched;
   }
-  return DispatchKeyEvent(keypressEvent, &aCharMsg);
+  return status == nsEventStatus_eConsumeNoDefault;
 }
 
 bool
@@ -1363,12 +1705,20 @@ NativeKey::HandleKeyUpMessage(bool* aEventDispatched) const
     return false;
   }
 
-  WidgetKeyboardEvent keyupEvent(true, NS_KEY_UP, mWidget);
-  InitKeyEvent(keyupEvent, mModKeyState);
-  if (aEventDispatched) {
-    *aEventDispatched = true;
+  nsresult rv = mDispatcher->BeginNativeInputTransaction();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return true;
   }
-  return DispatchKeyEvent(keyupEvent, &mMsg);
+
+  WidgetKeyboardEvent keyupEvent(true, eKeyUp, mWidget);
+  nsEventStatus status = InitKeyEvent(keyupEvent, mModKeyState, &mMsg);
+  bool dispatched =
+    mDispatcher->DispatchKeyboardEvent(eKeyUp, keyupEvent, status,
+                                       const_cast<NativeKey*>(this));
+  if (aEventDispatched) {
+    *aEventDispatched = dispatched;
+  }
+  return status == nsEventStatus_eConsumeNoDefault;
 }
 
 bool
@@ -1379,6 +1729,12 @@ NativeKey::NeedsToHandleWithoutFollowingCharMessages() const
   // Enter and backspace are always handled here to avoid for example the
   // confusion between ctrl-enter and ctrl-J.
   if (mDOMKeyCode == NS_VK_RETURN || mDOMKeyCode == NS_VK_BACK) {
+    return true;
+  }
+
+  // If inputting two or more characters, should be dispatched after removing
+  // whole following char messages.
+  if (mCommittedCharsAndModifiers.mLength > 1) {
     return true;
   }
 
@@ -1477,17 +1833,20 @@ NativeKey::GetFollowingCharMessage(MSG& aCharMsg) const
   aCharMsg.message = WM_NULL;
 
   if (mFakeCharMsgs) {
-    FakeCharMsg& fakeCharMsg = mFakeCharMsgs->ElementAt(0);
-    if (fakeCharMsg.mConsumed) {
-      return false;
+    for (size_t i = 0; i < mFakeCharMsgs->Length(); i++) {
+      FakeCharMsg& fakeCharMsg = mFakeCharMsgs->ElementAt(i);
+      if (fakeCharMsg.mConsumed) {
+        continue;
+      }
+      MSG charMsg = fakeCharMsg.GetCharMsg(mMsg.hwnd);
+      fakeCharMsg.mConsumed = true;
+      if (!IsCharMessage(charMsg)) {
+        return false;
+      }
+      aCharMsg = charMsg;
+      return true;
     }
-    MSG charMsg = fakeCharMsg.GetCharMsg(mMsg.hwnd);
-    fakeCharMsg.mConsumed = true;
-    if (!IsCharMessage(charMsg)) {
-      return false;
-    }
-    aCharMsg = charMsg;
-    return true;
+    return false;
   }
 
   // If next key message is not char message, we should give up to find a
@@ -1726,168 +2085,208 @@ NativeKey::DispatchPluginEventsAndDiscardsCharMessages() const
   return false;
 }
 
-bool
-NativeKey::DispatchKeyPressEventsWithKeyboardLayout() const
+void
+NativeKey::ComputeInputtingStringWithKeyboardLayout()
 {
-  MOZ_ASSERT(IsKeyDownMessage());
-  MOZ_ASSERT(!mIsDeadKey);
-
   KeyboardLayout* keyboardLayout = KeyboardLayout::GetInstance();
 
-  UniCharsAndModifiers inputtingChars(mCommittedCharsAndModifiers);
-  UniCharsAndModifiers shiftedChars;
-  UniCharsAndModifiers unshiftedChars;
-  uint32_t shiftedLatinChar = 0;
-  uint32_t unshiftedLatinChar = 0;
+  if (KeyboardLayout::IsPrintableCharKey(mVirtualKeyCode)) {
+    mInputtingStringAndModifiers = mCommittedCharsAndModifiers;
+  } else {
+    mInputtingStringAndModifiers.Clear();
+  }
+  mShiftedString.Clear();
+  mUnshiftedString.Clear();
+  mShiftedLatinChar = mUnshiftedLatinChar = 0;
 
-  if (!KeyboardLayout::IsPrintableCharKey(mVirtualKeyCode)) {
-    inputtingChars.Clear();
+  // XXX How about when Win key is pressed?
+  if (mModKeyState.IsControl() == mModKeyState.IsAlt()) {
+    return;
   }
 
-  if (mModKeyState.IsControl() ^ mModKeyState.IsAlt()) {
-    ModifierKeyState capsLockState(
-                       mModKeyState.GetModifiers() & MODIFIER_CAPSLOCK);
+  ModifierKeyState capsLockState(
+                     mModKeyState.GetModifiers() & MODIFIER_CAPSLOCK);
 
-    unshiftedChars =
-      keyboardLayout->GetUniCharsAndModifiers(mVirtualKeyCode, capsLockState);
-    capsLockState.Set(MODIFIER_SHIFT);
-    shiftedChars =
-      keyboardLayout->GetUniCharsAndModifiers(mVirtualKeyCode, capsLockState);
+  mUnshiftedString =
+    keyboardLayout->GetUniCharsAndModifiers(mVirtualKeyCode, capsLockState);
+  capsLockState.Set(MODIFIER_SHIFT);
+  mShiftedString =
+    keyboardLayout->GetUniCharsAndModifiers(mVirtualKeyCode, capsLockState);
 
-    // The current keyboard cannot input alphabets or numerics,
-    // we should append them for Shortcut/Access keys.
-    // E.g., for Cyrillic keyboard layout.
-    capsLockState.Unset(MODIFIER_SHIFT);
-    WidgetUtils::GetLatinCharCodeForKeyCode(mDOMKeyCode,
-                                            capsLockState.GetModifiers(),
-                                            &unshiftedLatinChar,
-                                            &shiftedLatinChar);
+  // The current keyboard cannot input alphabets or numerics,
+  // we should append them for Shortcut/Access keys.
+  // E.g., for Cyrillic keyboard layout.
+  capsLockState.Unset(MODIFIER_SHIFT);
+  WidgetUtils::GetLatinCharCodeForKeyCode(mDOMKeyCode,
+                                          capsLockState.GetModifiers(),
+                                          &mUnshiftedLatinChar,
+                                          &mShiftedLatinChar);
 
-    // If the shiftedLatinChar isn't 0, the key code is NS_VK_[A-Z].
-    if (shiftedLatinChar) {
-      // If the produced characters of the key on current keyboard layout
-      // are same as computed Latin characters, we shouldn't append the
-      // Latin characters to alternativeCharCode.
-      if (unshiftedLatinChar == unshiftedChars.mChars[0] &&
-          shiftedLatinChar == shiftedChars.mChars[0]) {
-        shiftedLatinChar = unshiftedLatinChar = 0;
-      }
-    } else if (unshiftedLatinChar) {
-      // If the shiftedLatinChar is 0, the keyCode doesn't produce
-      // alphabet character.  At that time, the character may be produced
-      // with Shift key.  E.g., on French keyboard layout, NS_VK_PERCENT
-      // key produces LATIN SMALL LETTER U WITH GRAVE (U+00F9) without
-      // Shift key but with Shift key, it produces '%'.
-      // If the unshiftedLatinChar is produced by the key on current
-      // keyboard layout, we shouldn't append it to alternativeCharCode.
-      if (unshiftedLatinChar == unshiftedChars.mChars[0] ||
-          unshiftedLatinChar == shiftedChars.mChars[0]) {
-        unshiftedLatinChar = 0;
-      }
+  // If the mShiftedLatinChar isn't 0, the key code is NS_VK_[A-Z].
+  if (mShiftedLatinChar) {
+    // If the produced characters of the key on current keyboard layout
+    // are same as computed Latin characters, we shouldn't append the
+    // Latin characters to alternativeCharCode.
+    if (mUnshiftedLatinChar == mUnshiftedString.mChars[0] &&
+        mShiftedLatinChar == mShiftedString.mChars[0]) {
+      mShiftedLatinChar = mUnshiftedLatinChar = 0;
     }
-
-    // If the charCode is not ASCII character, we should replace the
-    // charCode with ASCII character only when Ctrl is pressed.
-    // But don't replace the charCode when the charCode is not same as
-    // unmodified characters. In such case, Ctrl is sometimes used for a
-    // part of character inputting key combination like Shift.
-    if (mModKeyState.IsControl()) {
-      uint32_t ch =
-        mModKeyState.IsShift() ? shiftedLatinChar : unshiftedLatinChar;
-      if (ch &&
-          (!inputtingChars.mLength ||
-           inputtingChars.UniCharsCaseInsensitiveEqual(
-             mModKeyState.IsShift() ? shiftedChars : unshiftedChars))) {
-        inputtingChars.Clear();
-        inputtingChars.Append(ch, mModKeyState.GetModifiers());
-      }
+  } else if (mUnshiftedLatinChar) {
+    // If the mShiftedLatinChar is 0, the keyCode doesn't produce
+    // alphabet character.  At that time, the character may be produced
+    // with Shift key.  E.g., on French keyboard layout, NS_VK_PERCENT
+    // key produces LATIN SMALL LETTER U WITH GRAVE (U+00F9) without
+    // Shift key but with Shift key, it produces '%'.
+    // If the mUnshiftedLatinChar is produced by the key on current
+    // keyboard layout, we shouldn't append it to alternativeCharCode.
+    if (mUnshiftedLatinChar == mUnshiftedString.mChars[0] ||
+        mUnshiftedLatinChar == mShiftedString.mChars[0]) {
+      mUnshiftedLatinChar = 0;
     }
   }
 
-  if (inputtingChars.IsEmpty() &&
-      shiftedChars.IsEmpty() && unshiftedChars.IsEmpty()) {
-    WidgetKeyboardEvent keypressEvent(true, NS_KEY_PRESS, mWidget);
+  if (!mModKeyState.IsControl()) {
+    return;
+  }
+
+  // If the charCode is not ASCII character, we should replace the
+  // charCode with ASCII character only when Ctrl is pressed.
+  // But don't replace the charCode when the charCode is not same as
+  // unmodified characters. In such case, Ctrl is sometimes used for a
+  // part of character inputting key combination like Shift.
+  uint32_t ch =
+    mModKeyState.IsShift() ? mShiftedLatinChar : mUnshiftedLatinChar;
+  if (!ch) {
+    return;
+  }
+  if (mInputtingStringAndModifiers.IsEmpty() ||
+      mInputtingStringAndModifiers.UniCharsCaseInsensitiveEqual(
+        mModKeyState.IsShift() ? mShiftedString : mUnshiftedString)) {
+    mInputtingStringAndModifiers.Clear();
+    mInputtingStringAndModifiers.Append(ch, mModKeyState.GetModifiers());
+  }
+}
+
+bool
+NativeKey::DispatchKeyPressEventsWithoutCharMessage() const
+{
+  MOZ_ASSERT(IsKeyDownMessage());
+  MOZ_ASSERT(!mIsDeadKey || !mCommittedCharsAndModifiers.IsEmpty());
+
+  nsresult rv = mDispatcher->BeginNativeInputTransaction();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return true;
+  }
+
+  WidgetKeyboardEvent keypressEvent(true, eKeyPress, mWidget);
+  if (mInputtingStringAndModifiers.IsEmpty() &&
+      mShiftedString.IsEmpty() && mUnshiftedString.IsEmpty()) {
     keypressEvent.keyCode = mDOMKeyCode;
-    InitKeyEvent(keypressEvent, mModKeyState);
-    return DispatchKeyEvent(keypressEvent);
+  }
+  nsEventStatus status = InitKeyEvent(keypressEvent, mModKeyState);
+  mDispatcher->MaybeDispatchKeypressEvents(keypressEvent, status,
+                                           const_cast<NativeKey*>(this));
+  return status == nsEventStatus_eConsumeNoDefault;
+}
+
+void
+NativeKey::WillDispatchKeyboardEvent(WidgetKeyboardEvent& aKeyboardEvent,
+                                     uint32_t aIndex)
+{
+  uint32_t longestLength =
+    std::max(mInputtingStringAndModifiers.mLength,
+             std::max(mShiftedString.mLength, mUnshiftedString.mLength));
+  uint32_t skipUniChars = longestLength - mInputtingStringAndModifiers.mLength;
+  uint32_t skipShiftedChars = longestLength - mShiftedString.mLength;
+  uint32_t skipUnshiftedChars = longestLength - mUnshiftedString.mLength;
+  if (aIndex >= longestLength) {
+    return;
   }
 
-  uint32_t longestLength =
-    std::max(inputtingChars.mLength,
-             std::max(shiftedChars.mLength, unshiftedChars.mLength));
-  uint32_t skipUniChars = longestLength - inputtingChars.mLength;
-  uint32_t skipShiftedChars = longestLength - shiftedChars.mLength;
-  uint32_t skipUnshiftedChars = longestLength - unshiftedChars.mLength;
-  UINT keyCode = !inputtingChars.mLength ? mDOMKeyCode : 0;
-  bool defaultPrevented = false;
-  for (uint32_t cnt = 0; cnt < longestLength; cnt++) {
-    uint16_t uniChar, shiftedChar, unshiftedChar;
-    uniChar = shiftedChar = unshiftedChar = 0;
-    ModifierKeyState modKeyState(mModKeyState);
-    if (skipUniChars <= cnt) {
-      if (cnt - skipUniChars  < inputtingChars.mLength) {
-        // If key in combination with Alt and/or Ctrl produces a different
-        // character than without them then do not report these flags
-        // because it is separate keyboard layout shift state. If dead-key
-        // and base character does not produce a valid composite character
-        // then both produced dead-key character and following base
-        // character may have different modifier flags, too.
-        modKeyState.Unset(MODIFIER_SHIFT | MODIFIER_CONTROL | MODIFIER_ALT |
-                          MODIFIER_ALTGRAPH | MODIFIER_CAPSLOCK);
-        modKeyState.Set(inputtingChars.mModifiers[cnt - skipUniChars]);
-      }
-      uniChar = inputtingChars.mChars[cnt - skipUniChars];
-    }
-    if (skipShiftedChars <= cnt)
-      shiftedChar = shiftedChars.mChars[cnt - skipShiftedChars];
-    if (skipUnshiftedChars <= cnt)
-      unshiftedChar = unshiftedChars.mChars[cnt - skipUnshiftedChars];
-    nsAutoTArray<AlternativeCharCode, 5> altArray;
+  nsTArray<AlternativeCharCode>& altArray = aKeyboardEvent.alternativeCharCodes;
 
-    if (shiftedChar || unshiftedChar) {
-      AlternativeCharCode chars(unshiftedChar, shiftedChar);
+  uint16_t shiftedChar = 0, unshiftedChar = 0;
+  if (skipUniChars <= aIndex) {
+    // XXX Modifying modifier state of aKeyboardEvent is illegal, but no way
+    //     to set different modifier state per keypress event except this
+    //     hack.  Note that ideally, dead key should cause composition events
+    //     instead of keypress events, though.
+    if (aIndex - skipUniChars  < mInputtingStringAndModifiers.mLength) {
+      ModifierKeyState modKeyState(mModKeyState);
+      // If key in combination with Alt and/or Ctrl produces a different
+      // character than without them then do not report these flags
+      // because it is separate keyboard layout shift state. If dead-key
+      // and base character does not produce a valid composite character
+      // then both produced dead-key character and following base
+      // character may have different modifier flags, too.
+      modKeyState.Unset(MODIFIER_SHIFT | MODIFIER_CONTROL | MODIFIER_ALT |
+                        MODIFIER_ALTGRAPH | MODIFIER_CAPSLOCK);
+      modKeyState.Set(
+        mInputtingStringAndModifiers.mModifiers[aIndex - skipUniChars]);
+      modKeyState.InitInputEvent(aKeyboardEvent);
+    }
+    uint16_t uniChar =
+      mInputtingStringAndModifiers.mChars[aIndex - skipUniChars];
+    if (aKeyboardEvent.mMessage == eKeyPress) {
+      // charCode is set from mKeyValue but e.g., when Ctrl key is pressed,
+      // the value should indicate an ASCII character for backward
+      // compatibility instead of inputting character without the modifiers.
+      aKeyboardEvent.charCode = uniChar;
+      MOZ_ASSERT(!aKeyboardEvent.keyCode);
+    } else if (uniChar) {
+      // If the event is not keypress event, we should set charCode as
+      // first alternative char code since the char code value is necessary
+      // for shortcut key handlers at looking for a proper handler.
+      AlternativeCharCode chars(0, 0);
+      if (!aKeyboardEvent.IsShift()) {
+        chars.mUnshiftedCharCode = uniChar;
+      } else {
+        chars.mShiftedCharCode = uniChar;
+      }
       altArray.AppendElement(chars);
     }
-    if (cnt == longestLength - 1) {
-      if (unshiftedLatinChar || shiftedLatinChar) {
-        AlternativeCharCode chars(unshiftedLatinChar, shiftedLatinChar);
-        altArray.AppendElement(chars);
-      }
-
-      // Typically, following virtual keycodes are used for a key which can
-      // input the character.  However, these keycodes are also used for
-      // other keys on some keyboard layout.  E.g., in spite of Shift+'1'
-      // inputs '+' on Thai keyboard layout, a key which is at '=/+'
-      // key on ANSI keyboard layout is VK_OEM_PLUS.  Native applications
-      // handle it as '+' key if Ctrl key is pressed.
-      char16_t charForOEMKeyCode = 0;
-      switch (mVirtualKeyCode) {
-        case VK_OEM_PLUS:   charForOEMKeyCode = '+'; break;
-        case VK_OEM_COMMA:  charForOEMKeyCode = ','; break;
-        case VK_OEM_MINUS:  charForOEMKeyCode = '-'; break;
-        case VK_OEM_PERIOD: charForOEMKeyCode = '.'; break;
-      }
-      if (charForOEMKeyCode &&
-          charForOEMKeyCode != unshiftedChars.mChars[0] &&
-          charForOEMKeyCode != shiftedChars.mChars[0] &&
-          charForOEMKeyCode != unshiftedLatinChar &&
-          charForOEMKeyCode != shiftedLatinChar) {
-        AlternativeCharCode OEMChars(charForOEMKeyCode, charForOEMKeyCode);
-        altArray.AppendElement(OEMChars);
-      }
-    }
-
-    WidgetKeyboardEvent keypressEvent(true, NS_KEY_PRESS, mWidget);
-    keypressEvent.charCode = uniChar;
-    keypressEvent.alternativeCharCodes.AppendElements(altArray);
-    InitKeyEvent(keypressEvent, modKeyState);
-    defaultPrevented = (DispatchKeyEvent(keypressEvent) || defaultPrevented);
-    if (mWidget->Destroyed()) {
-      return true;
-    }
   }
 
-  return defaultPrevented;
+  if (skipShiftedChars <= aIndex) {
+    shiftedChar = mShiftedString.mChars[aIndex - skipShiftedChars];
+  }
+  if (skipUnshiftedChars <= aIndex) {
+    unshiftedChar = mUnshiftedString.mChars[aIndex - skipUnshiftedChars];
+  }
+
+  if (shiftedChar || unshiftedChar) {
+    AlternativeCharCode chars(unshiftedChar, shiftedChar);
+    altArray.AppendElement(chars);
+  }
+
+  if (aIndex == longestLength - 1) {
+    if (mUnshiftedLatinChar || mShiftedLatinChar) {
+      AlternativeCharCode chars(mUnshiftedLatinChar, mShiftedLatinChar);
+      altArray.AppendElement(chars);
+    }
+
+    // Typically, following virtual keycodes are used for a key which can
+    // input the character.  However, these keycodes are also used for
+    // other keys on some keyboard layout.  E.g., in spite of Shift+'1'
+    // inputs '+' on Thai keyboard layout, a key which is at '=/+'
+    // key on ANSI keyboard layout is VK_OEM_PLUS.  Native applications
+    // handle it as '+' key if Ctrl key is pressed.
+    char16_t charForOEMKeyCode = 0;
+    switch (mVirtualKeyCode) {
+      case VK_OEM_PLUS:   charForOEMKeyCode = '+'; break;
+      case VK_OEM_COMMA:  charForOEMKeyCode = ','; break;
+      case VK_OEM_MINUS:  charForOEMKeyCode = '-'; break;
+      case VK_OEM_PERIOD: charForOEMKeyCode = '.'; break;
+    }
+    if (charForOEMKeyCode &&
+        charForOEMKeyCode != mUnshiftedString.mChars[0] &&
+        charForOEMKeyCode != mShiftedString.mChars[0] &&
+        charForOEMKeyCode != mUnshiftedLatinChar &&
+        charForOEMKeyCode != mShiftedLatinChar) {
+      AlternativeCharCode OEMChars(charForOEMKeyCode, charForOEMKeyCode);
+      altArray.AppendElement(OEMChars);
+    }
+  }
 }
 
 bool
@@ -1950,20 +2349,16 @@ NativeKey::DispatchKeyPressEventForFollowingCharMessage(
 KeyboardLayout* KeyboardLayout::sInstance = nullptr;
 nsIIdleServiceInternal* KeyboardLayout::sIdleService = nullptr;
 
-#ifdef PR_LOGGING
 PRLogModuleInfo* sKeyboardLayoutLogger = nullptr;
-#endif // #ifdef PR_LOGGING
 
 // static
 KeyboardLayout*
 KeyboardLayout::GetInstance()
 {
   if (!sInstance) {
-#ifdef PR_LOGGING
     if (!sKeyboardLayoutLogger) {
       sKeyboardLayoutLogger = PR_NewLogModule("KeyboardLayoutWidgets");
     }
-#endif // #ifdef PR_LOGGING
     sInstance = new KeyboardLayout();
     nsCOMPtr<nsIIdleServiceInternal> idleService =
       do_GetService("@mozilla.org/widget/idleservice;1");
@@ -2066,8 +2461,7 @@ KeyboardLayout::InitNativeKey(NativeKey& aNativeKey,
         mVirtualKeys[virtualKeyIndex].GetNativeUniChars(shiftState);
       NS_ASSERTION(deadChars.mLength == 1,
                    "dead key must generate only one character");
-      aNativeKey.mKeyNameIndex =
-        WidgetUtils::GetDeadKeyNameIndex(deadChars.mChars[0]);
+      aNativeKey.mKeyNameIndex = KEY_NAME_INDEX_Dead;
       return;
     }
 
@@ -2253,20 +2647,19 @@ KeyboardLayout::LoadLayout(HKL aLayout)
 
   ::SetKeyboardState(originalKbdState);
 
-#ifdef PR_LOGGING
-  if (PR_LOG_TEST(sKeyboardLayoutLogger, PR_LOG_DEBUG)) {
+  if (MOZ_LOG_TEST(sKeyboardLayoutLogger, LogLevel::Debug)) {
     static const UINT kExtendedScanCode[] = { 0x0000, 0xE000 };
     static const UINT kMapType =
       IsVistaOrLater() ? MAPVK_VSC_TO_VK_EX : MAPVK_VSC_TO_VK;
-    PR_LOG(sKeyboardLayoutLogger, PR_LOG_DEBUG,
-           ("Logging virtual keycode values for scancode (0x%08X)...",
-            reinterpret_cast<const uint32_t>(mKeyboardLayout)));
+    MOZ_LOG(sKeyboardLayoutLogger, LogLevel::Debug,
+           ("Logging virtual keycode values for scancode (0x%p)...",
+            mKeyboardLayout));
     for (uint32_t i = 0; i < ArrayLength(kExtendedScanCode); i++) {
       for (uint32_t j = 1; j <= 0xFF; j++) {
         UINT scanCode = kExtendedScanCode[i] + j;
         UINT virtualKeyCode =
           ::MapVirtualKeyEx(scanCode, kMapType, mKeyboardLayout);
-        PR_LOG(sKeyboardLayoutLogger, PR_LOG_DEBUG,
+        MOZ_LOG(sKeyboardLayoutLogger, LogLevel::Debug,
                ("0x%04X, %s", scanCode, kVirtualKeyName[virtualKeyCode]));
       }
       // XP and Server 2003 don't support 0xE0 prefix of the scancode.
@@ -2276,7 +2669,6 @@ KeyboardLayout::LoadLayout(HKL aLayout)
       }
     }
   }
-#endif // #ifdef PR_LOGGING
 }
 
 inline int32_t
@@ -2601,6 +2993,7 @@ KeyboardLayout::ConvertNativeKeyCodeToDOMKeyCode(UINT aNativeKeyCode) const
     case VK_BROWSER_FAVORITES:
     case VK_BROWSER_HOME:
     case VK_MEDIA_NEXT_TRACK:
+    case VK_MEDIA_PREV_TRACK:
     case VK_MEDIA_STOP:
     case VK_MEDIA_PLAY_PAUSE:
     case VK_LAUNCH_MAIL:
@@ -2721,11 +3114,6 @@ KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
     return KEY_NAME_INDEX_USE_STRING;
   }
 
-#define NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
-#define NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
-#define NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
-#define NS_OTHER_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
-
   switch (aVirtualKey) {
 
 #undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
@@ -2735,7 +3123,6 @@ KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
 #include "NativeKeyToDOMKeyName.h"
 
 #undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
-#define NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
 
     default:
       break;
@@ -2755,7 +3142,6 @@ KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
 #include "NativeKeyToDOMKeyName.h"
 
 #undef NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
-#define NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
 
       default:
         break;
@@ -2770,7 +3156,6 @@ KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
 #include "NativeKeyToDOMKeyName.h"
 
 #undef NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
-#define NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
 
       default:
         return KEY_NAME_INDEX_Unidentified;
@@ -2785,9 +3170,6 @@ KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
 
 #include "NativeKeyToDOMKeyName.h"
 
-#undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
-#undef NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
-#undef NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
 #undef NS_OTHER_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
 
     default:
@@ -2907,7 +3289,7 @@ KeyboardLayout::SynthesizeNativeKeyEvent(nsWindowBase* aWidget,
       break;
   }
 
-  nsAutoTArray<KeyPair,10> keySequence;
+  AutoTArray<KeyPair,10> keySequence;
   WinUtils::SetupKeyModifiersSequence(&keySequence, aModifierFlags);
   NS_ASSERTION(aNativeKeyCode >= 0 && aNativeKeyCode < 256,
                "Native VK key code out of range");
@@ -2948,7 +3330,7 @@ KeyboardLayout::SynthesizeNativeKeyEvent(nsWindowBase* aWidget,
         NativeKey nativeKey(aWidget, keyDownMsg, modKeyState);
         nativeKey.HandleKeyDownMessage();
       } else {
-        nsAutoTArray<NativeKey::FakeCharMsg, 10> fakeCharMsgs;
+        AutoTArray<NativeKey::FakeCharMsg, 10> fakeCharMsgs;
         for (uint32_t j = 0; j < chars.Length(); j++) {
           NativeKey::FakeCharMsg* fakeCharMsg = fakeCharMsgs.AppendElement();
           fakeCharMsg->mCharCode = chars.CharAt(j);

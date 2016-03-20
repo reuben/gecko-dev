@@ -6,14 +6,28 @@
 #ifndef _MOZILLA_GFX_SOURCESURFACECG_H
 #define _MOZILLA_GFX_SOURCESURFACECG_H
 
+#ifdef MOZ_WIDGET_COCOA
 #include <ApplicationServices/ApplicationServices.h>
+#else
+#include <CoreGraphics/CoreGraphics.h>
+#endif
 
 #include "2D.h"
 
+#ifdef MOZ_WIDGET_COCOA
 class MacIOSurface;
+#endif
 
 namespace mozilla {
 namespace gfx {
+
+CGImageRef
+CreateCGImage(CGDataProviderReleaseDataCallback aCallback,
+              void *aInfo,
+              const void *aData,
+              const IntSize &aSize,
+              int32_t aStride,
+              SurfaceFormat aFormat);
 
 CGImageRef
 CreateCGImage(void *aInfo,
@@ -29,13 +43,13 @@ class SourceSurfaceCG : public SourceSurface
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SourceSurfaceCG)
   SourceSurfaceCG() {}
-  SourceSurfaceCG(CGImageRef aImage) : mImage(aImage) {}
+  explicit SourceSurfaceCG(CGImageRef aImage) : mImage(aImage) {}
   ~SourceSurfaceCG();
 
   virtual SurfaceType GetType() const { return SurfaceType::COREGRAPHICS_IMAGE; }
   virtual IntSize GetSize() const;
   virtual SurfaceFormat GetFormat() const;
-  virtual TemporaryRef<DataSourceSurface> GetDataSurface();
+  virtual already_AddRefed<DataSourceSurface> GetDataSurface();
 
   CGImageRef GetImage() { return mImage; }
 
@@ -58,7 +72,7 @@ class DataSourceSurfaceCG : public DataSourceSurface
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceCG)
   DataSourceSurfaceCG() {}
-  DataSourceSurfaceCG(CGImageRef aImage);
+  explicit DataSourceSurfaceCG(CGImageRef aImage);
   ~DataSourceSurfaceCG();
 
   virtual SurfaceType GetType() const { return SurfaceType::DATA; }
@@ -93,6 +107,7 @@ class SourceSurfaceCGContext : public DataSourceSurface
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceCGContext)
   virtual void DrawTargetWillChange() = 0;
+  virtual void DrawTargetWillGoAway() = 0;
   virtual CGImageRef GetImage() = 0;
 };
 
@@ -100,13 +115,13 @@ class SourceSurfaceCGBitmapContext : public SourceSurfaceCGContext
 {
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceCGBitmapContext)
-  SourceSurfaceCGBitmapContext(DrawTargetCG *);
+  explicit SourceSurfaceCGBitmapContext(DrawTargetCG *);
   ~SourceSurfaceCGBitmapContext();
 
   virtual SurfaceType GetType() const { return SurfaceType::COREGRAPHICS_CGCONTEXT; }
   virtual IntSize GetSize() const;
   virtual SurfaceFormat GetFormat() const { return mFormat; }
-  virtual TemporaryRef<DataSourceSurface> GetDataSurface()
+  virtual already_AddRefed<DataSourceSurface> GetDataSurface()
   {
     // This call to DrawTargetWillChange() is needed to make a local copy of
     // the data from mDrawTarget.  If we don't do that, the data can end up
@@ -118,7 +133,8 @@ public:
     //
     // For more information see bug 925448.
     DrawTargetWillChange();
-    return this;
+    RefPtr<DataSourceSurface> copy(this);
+    return copy.forget();
   }
 
   CGImageRef GetImage() { EnsureImage(); return mImage; }
@@ -131,6 +147,7 @@ private:
   //XXX: do the other backends friend their DrawTarget?
   friend class DrawTargetCG;
   virtual void DrawTargetWillChange();
+  virtual void DrawTargetWillGoAway();
   void EnsureImage() const;
 
   // We hold a weak reference to these two objects.
@@ -152,11 +169,12 @@ private:
   IntSize mSize;
 };
 
+#ifdef MOZ_WIDGET_COCOA
 class SourceSurfaceCGIOSurfaceContext : public SourceSurfaceCGContext
 {
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceCGIOSurfaceContext)
-  SourceSurfaceCGIOSurfaceContext(DrawTargetCG *);
+  explicit SourceSurfaceCGIOSurfaceContext(DrawTargetCG *);
   ~SourceSurfaceCGIOSurfaceContext();
 
   virtual SurfaceType GetType() const { return SurfaceType::COREGRAPHICS_CGCONTEXT; }
@@ -173,6 +191,7 @@ private:
   //XXX: do the other backends friend their DrawTarget?
   friend class DrawTargetCG;
   virtual void DrawTargetWillChange();
+  virtual void DrawTargetWillGoAway() { DrawTargetWillChange(); }
   void EnsureImage() const;
 
   SurfaceFormat mFormat;
@@ -184,9 +203,10 @@ private:
 
   IntSize mSize;
 };
+#endif
 
 
-}
-}
+} // namespace gfx
+} // namespace mozilla
 
 #endif // _MOZILLA_GFX_SOURCESURFACECG_H

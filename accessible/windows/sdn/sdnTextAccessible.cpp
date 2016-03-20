@@ -15,6 +15,7 @@
 #include "nsFontMetrics.h"
 #include "nsPresContext.h"
 #include "nsLayoutUtils.h"
+#include "nsRange.h"
 #include "gfxFont.h"
 #include "nsIAccessibleTypes.h"
 #include "mozilla/gfx/2D.h"
@@ -74,11 +75,8 @@ sdnTextAccessible::get_clippedSubstringBounds(unsigned int aStartIndex,
   NS_ASSERTION(document,
                "There must always be a doc accessible, but there isn't. Crash!");
 
-  nscoord docX = 0, docY = 0, docWidth = 0, docHeight = 0;
-  document->GetBounds(&docX, &docY, &docWidth, &docHeight);
-
+  nsIntRect docRect = document->Bounds();
   nsIntRect unclippedRect(x, y, width, height);
-  nsIntRect docRect(docX, docY, docWidth, docHeight);
 
   nsIntRect clippedRect;
   clippedRect.IntersectRect(unclippedRect, docRect);
@@ -150,7 +148,7 @@ sdnTextAccessible::scrollToSubstring(unsigned int aStartIndex,
   if (mAccessible->IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
-  nsRefPtr<nsRange> range = new nsRange(mAccessible->GetContent());
+  RefPtr<nsRange> range = new nsRange(mAccessible->GetContent());
   if (NS_FAILED(range->SetStart(mAccessible->GetContent(), aStartIndex)))
     return E_FAIL;
 
@@ -181,10 +179,11 @@ sdnTextAccessible::get_fontFamily(BSTR __RPC_FAR* aFontFamily)
   if (!frame)
     return E_FAIL;
 
-  nsRefPtr<nsFontMetrics> fm;
+  RefPtr<nsFontMetrics> fm;
   nsLayoutUtils::GetFontMetricsForFrame(frame, getter_AddRefs(fm));
 
-  const nsString& name = fm->GetThebesFontGroup()->GetFontAt(0)->GetName();
+  const nsString& name =
+    fm->GetThebesFontGroup()->GetFirstValidFont()->GetName();
   if (name.IsEmpty())
     return S_FALSE;
 

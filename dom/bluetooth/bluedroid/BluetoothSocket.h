@@ -1,85 +1,110 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_bluetooth_BluetoothSocket_h
-#define mozilla_dom_bluetooth_BluetoothSocket_h
+#ifndef mozilla_dom_bluetooth_bluedroid_BluetoothSocket_h
+#define mozilla_dom_bluetooth_bluedroid_BluetoothSocket_h
 
 #include "BluetoothCommon.h"
-#include "mozilla/ipc/UnixSocket.h"
+#include "mozilla/ipc/DataSocket.h"
+
+class MessageLoop;
 
 BEGIN_BLUETOOTH_NAMESPACE
 
+class BluetoothSocketInterface;
 class BluetoothSocketObserver;
+class BluetoothSocketResultHandler;
 class DroidSocketImpl;
 
-class BluetoothSocket : public mozilla::ipc::UnixSocketConsumer
+class BluetoothSocket final : public mozilla::ipc::DataSocket
 {
 public:
-  BluetoothSocket(BluetoothSocketObserver* aObserver,
+  BluetoothSocket(BluetoothSocketObserver* aObserver);
+  ~BluetoothSocket();
+
+  void SetObserver(BluetoothSocketObserver* aObserver);
+
+  nsresult Connect(const BluetoothAddress& aDeviceAddress,
+                   const BluetoothUuid& aServiceUuid,
+                   BluetoothSocketType aType,
+                   int aChannel,
+                   bool aAuth, bool aEncrypt,
+                   MessageLoop* aConsumerLoop,
+                   MessageLoop* aIOLoop);
+
+  nsresult Connect(const BluetoothAddress& aDeviceAddress,
+                   const BluetoothUuid& aServiceUuid,
+                   BluetoothSocketType aType,
+                   int aChannel,
+                   bool aAuth, bool aEncrypt);
+
+  nsresult Listen(const nsAString& aServiceName,
+                  const BluetoothUuid& aServiceUuid,
                   BluetoothSocketType aType,
-                  bool aAuth,
-                  bool aEncrypt);
+                  int aChannel,
+                  bool aAuth, bool aEncrypt,
+                  MessageLoop* aConsumerLoop,
+                  MessageLoop* aIOLoop);
+
+  nsresult Listen(const nsAString& aServiceName,
+                  const BluetoothUuid& aServiceUuid,
+                  BluetoothSocketType aType,
+                  int aChannel,
+                  bool aAuth, bool aEncrypt);
+
+  nsresult Accept(int aListenFd, BluetoothSocketResultHandler* aRes);
 
   /**
-   * Connect to remote server as a client.
+   * Method to be called whenever data is received. This is only called on the
+   * consumer thread.
    *
-   * The steps are as following:
-   * 1) BluetoothSocket acquires fd from bluedroid, and creates
-   *    a DroidSocketImpl to watch read/write of the fd.
-   * 2) DroidSocketImpl receives first 2 messages to get socket info.
-   * 3) Obex client session starts.
+   * @param aBuffer Data received from the socket.
    */
-  bool Connect(const nsAString& aDeviceAddress, int aChannel);
+  void ReceiveSocketData(nsAutoPtr<mozilla::ipc::UnixSocketBuffer>& aBuffer);
 
-  /**
-   * Listen to incoming connection as a server.
-   *
-   * The steps are as following:
-   * 1) BluetoothSocket acquires fd from bluedroid, and creates
-   *    a DroidSocketImpl to watch read of the fd. DroidSocketImpl
-   *    receives the 1st message immediately.
-   * 2) When there's incoming connection, DroidSocketImpl receives
-   *    2nd message to get socket info and client fd.
-   * 3) DroidSocketImpl stops watching read of original fd and
-   *    starts to watch read/write of client fd.
-   * 4) Obex server session starts.
-   */
-  bool Listen(int aChannel);
-
-  inline void Disconnect()
-  {
-    CloseDroidSocket();
-  }
-
-  virtual void OnConnectSuccess() MOZ_OVERRIDE;
-  virtual void OnConnectError() MOZ_OVERRIDE;
-  virtual void OnDisconnect() MOZ_OVERRIDE;
-  virtual void ReceiveSocketData(
-    nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage) MOZ_OVERRIDE;
-
-  inline void GetAddress(nsAString& aDeviceAddress)
+  inline void GetAddress(BluetoothAddress& aDeviceAddress)
   {
     aDeviceAddress = mDeviceAddress;
   }
 
-  void CloseDroidSocket();
-  bool SendDroidSocketData(mozilla::ipc::UnixSocketRawData* aData);
+  inline void SetAddress(const BluetoothAddress& aDeviceAddress)
+  {
+    mDeviceAddress = aDeviceAddress;
+  }
+
+  // Methods for |DataSocket|
+  //
+
+  void SendSocketData(mozilla::ipc::UnixSocketIOBuffer* aBuffer) override;
+
+  // Methods for |SocketBase|
+  //
+
+  void Close() override;
+
+  void OnConnectSuccess() override;
+  void OnConnectError() override;
+  void OnDisconnect() override;
 
 private:
-  BluetoothSocketObserver* mObserver;
-  DroidSocketImpl* mImpl;
-  nsString mDeviceAddress;
-  bool mAuth;
-  bool mEncrypt;
-  bool mIsServer;
-  int mReceivedSocketInfoLength;
+  nsresult LoadSocketInterface();
+  void Cleanup();
 
-  bool ReceiveSocketInfo(nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage);
+  inline void SetCurrentResultHandler(BluetoothSocketResultHandler* aRes)
+  {
+    mCurrentRes = aRes;
+  }
+
+  BluetoothSocketInterface* mSocketInterface;
+  BluetoothSocketObserver* mObserver;
+  BluetoothSocketResultHandler* mCurrentRes;
+  DroidSocketImpl* mImpl;
+  BluetoothAddress mDeviceAddress;
 };
 
 END_BLUETOOTH_NAMESPACE
 
-#endif
+#endif // mozilla_dom_bluetooth_bluedroid_BluetoothSocket_h

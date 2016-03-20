@@ -13,6 +13,10 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include <tlhelp32.h>
+#include <io.h>
+#ifndef STDOUT_FILENO
+#define STDOUT_FILENO 1
+#endif
 #elif defined(OS_LINUX) || defined(__GLIBC__)
 #include <dirent.h>
 #include <limits.h>
@@ -24,6 +28,11 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <stdio.h>
+#include <stdlib.h>
+#ifndef OS_WIN
+#include <unistd.h>
+#endif
 
 #include "base/command_line.h"
 #include "base/process.h"
@@ -62,7 +71,8 @@ enum ProcessArchitecture {
   PROCESS_ARCH_I386 = 0x1,
   PROCESS_ARCH_X86_64 = 0x2,
   PROCESS_ARCH_PPC = 0x4,
-  PROCESS_ARCH_ARM = 0x8
+  PROCESS_ARCH_ARM = 0x8,
+  PROCESS_ARCH_MIPS = 0x10
 };
 
 inline ProcessArchitecture GetCurrentProcessArchitecture()
@@ -76,6 +86,8 @@ inline ProcessArchitecture GetCurrentProcessArchitecture()
   currentArchitecture = base::PROCESS_ARCH_PPC;
 #elif defined(ARCH_CPU_ARMEL)
   currentArchitecture = base::PROCESS_ARCH_ARM;
+#elif defined(ARCH_CPU_MIPS)
+  currentArchitecture = base::PROCESS_ARCH_MIPS;
 #endif
   return currentArchitecture;
 }
@@ -100,10 +112,13 @@ ProcessHandle GetCurrentProcessHandle();
 bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle);
 
 // Converts a PID to a process handle. On Windows the handle is opened
-// with more access rights and must only be used by trusted code.
+// with more access rights and must only be used by trusted code. Parameter
+// error can be used to get the error code in opening the process handle.
 // You have to close returned handle using CloseProcessHandle. Returns true
 // on success.
-bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle);
+bool OpenPrivilegedProcessHandle(ProcessId pid,
+                                 ProcessHandle* handle,
+                                 int64_t* error = nullptr);
 
 // Closes the process handle opened by OpenProcessHandle.
 void CloseProcessHandle(ProcessHandle process);
@@ -248,6 +263,49 @@ class ProcessMetrics {
 };
 
 }  // namespace base
+
+namespace mozilla {
+
+class EnvironmentLog
+{
+public:
+  explicit EnvironmentLog(const char* varname) {
+    const char *e = getenv(varname);
+    if (e && *e) {
+      fname_ = e;
+    }
+  }
+
+  ~EnvironmentLog() {}
+
+  void print(const char* format, ...) {
+    if (!fname_.size())
+      return;
+
+    FILE* f;
+    if (fname_.compare("-") == 0) {
+      f = fdopen(dup(STDOUT_FILENO), "a");
+    } else {
+      f = fopen(fname_.c_str(), "a");
+    }
+
+    if (!f)
+      return;
+
+    va_list a;
+    va_start(a, format);
+    vfprintf(f, format, a);
+    va_end(a);
+    fclose(f);
+  }
+
+private:
+  std::string fname_;
+
+  DISALLOW_EVIL_CONSTRUCTORS(EnvironmentLog);
+};
+
+} // namespace mozilla
 
 #if defined(OS_WIN)
 // Undo the windows.h damage

@@ -10,11 +10,11 @@ const MSGS = 3;
 SpecialPowers.addPermission("sms", true, document);
 SpecialPowers.setBoolPref("dom.sms.enabled", true);
 
-let manager = window.navigator.mozMobileMessage;
+var manager = window.navigator.mozMobileMessage;
 ok(manager instanceof MozMobileMessageManager,
    "manager is instance of " + manager.constructor);
 
-let pendingEmulatorCmdCount = 0;
+var pendingEmulatorCmdCount = 0;
 function sendSmsToEmulator(from, text) {
   ++pendingEmulatorCmdCount;
 
@@ -26,7 +26,7 @@ function sendSmsToEmulator(from, text) {
   });
 }
 
-let tasks = {
+var tasks = {
   // List of test fuctions. Each of them should call |tasks.next()| when
   // completed or |tasks.finish()| to jump to the last one.
   _tasks: [],
@@ -60,9 +60,6 @@ let tasks = {
 };
 
 function getAllMessages(callback, filter, reverse) {
-  if (!filter) {
-    filter = new MozSmsFilter;
-  }
   let messages = [];
   let cursor = manager.getMessages(filter, reverse || false);
   cursor.onsuccess = function(event) {
@@ -124,7 +121,7 @@ tasks.push(getAllThreads.bind(null, function(threads) {
   tasks.next();
 }));
 
-let gotMessagesCount = 0;
+var gotMessagesCount = 0;
 tasks.push(function() {
   manager.onreceived = function() {
     ++gotMessagesCount;
@@ -139,7 +136,7 @@ tasks.push(function() {
   tasks.next();
 });
 
-let allMessages;
+var allMessages;
 tasks.push(function waitAllMessageReceived() {
   if (gotMessagesCount != MSGS) {
     window.setTimeout(waitAllMessageReceived, 100);
@@ -153,7 +150,7 @@ tasks.push(function waitAllMessageReceived() {
 });
 
 
-let originalThread;
+var originalThread;
 tasks.push(getAllThreads.bind(null, function(threads) {
   is(threads.length, 1, "Should have only one thread");
 

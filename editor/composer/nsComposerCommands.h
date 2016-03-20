@@ -38,8 +38,8 @@ public:
   NS_DECL_ISUPPORTS
 
   // nsIControllerCommand. Declared longhand so we can make them pure virtual
-  NS_IMETHOD IsCommandEnabled(const char * aCommandName, nsISupports *aCommandRefCon, bool *_retval) = 0;
-  NS_IMETHOD DoCommand(const char * aCommandName, nsISupports *aCommandRefCon) = 0;
+  NS_IMETHOD IsCommandEnabled(const char * aCommandName, nsISupports *aCommandRefCon, bool *_retval) override = 0;
+  NS_IMETHOD DoCommand(const char * aCommandName, nsISupports *aCommandRefCon) override = 0;
 
 };
 
@@ -55,7 +55,7 @@ public:                                                 \
 class nsBaseStateUpdatingCommand : public nsBaseComposerCommand
 {
 public:
-  nsBaseStateUpdatingCommand(nsIAtom* aTagName);
+  explicit nsBaseStateUpdatingCommand(nsIAtom* aTagName);
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -66,7 +66,7 @@ protected:
 
   // get the current state (on or off) for this style or block format
   virtual nsresult  GetCurrentState(nsIEditor* aEditor, nsICommandParams* aParams) = 0;
-  
+
   // add/remove the style
   virtual nsresult  ToggleState(nsIEditor* aEditor) = 0;
 
@@ -80,13 +80,13 @@ protected:
 class nsStyleUpdatingCommand : public nsBaseStateUpdatingCommand
 {
 public:
-  nsStyleUpdatingCommand(nsIAtom* aTagName);
-           
+  explicit nsStyleUpdatingCommand(nsIAtom* aTagName);
+
 protected:
 
   // get the current state (on or off) for this style or block format
   virtual nsresult  GetCurrentState(nsIEditor* aEditor, nsICommandParams* aParams);
-  
+
   // add/remove the style
   virtual nsresult  ToggleState(nsIEditor* aEditor);
 };
@@ -96,7 +96,7 @@ class nsInsertTagCommand : public nsBaseComposerCommand
 {
 public:
   explicit nsInsertTagCommand(nsIAtom* aTagName);
-    
+
   NS_DECL_ISUPPORTS_INHERITED
 
   NS_DECL_NSICONTROLLERCOMMAND
@@ -111,13 +111,13 @@ protected:
 class nsListCommand : public nsBaseStateUpdatingCommand
 {
 public:
-  nsListCommand(nsIAtom* aTagName);
+  explicit nsListCommand(nsIAtom* aTagName);
 
 protected:
 
   // get the current state (on or off) for this style or block format
   virtual nsresult  GetCurrentState(nsIEditor* aEditor, nsICommandParams* aParams);
-  
+
   // add/remove the style
   virtual nsresult  ToggleState(nsIEditor* aEditor);
 };
@@ -125,13 +125,13 @@ protected:
 class nsListItemCommand : public nsBaseStateUpdatingCommand
 {
 public:
-  nsListItemCommand(nsIAtom* aTagName);
+  explicit nsListItemCommand(nsIAtom* aTagName);
 
 protected:
 
   // get the current state (on or off) for this style or block format
   virtual nsresult  GetCurrentState(nsIEditor* aEditor, nsICommandParams* aParams);
-  
+
   // add/remove the style
   virtual nsresult  ToggleState(nsIEditor* aEditor);
 };
@@ -140,9 +140,9 @@ protected:
 class nsMultiStateCommand : public nsBaseComposerCommand
 {
 public:
-  
+
   nsMultiStateCommand();
-  
+
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSICONTROLLERCOMMAND
 
@@ -151,7 +151,7 @@ protected:
 
   virtual nsresult GetCurrentState(nsIEditor *aEditor, nsICommandParams* aParams) =0;
   virtual nsresult SetState(nsIEditor *aEditor, nsString& newState) = 0;
-  
+
 };
 
 

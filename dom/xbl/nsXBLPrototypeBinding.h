@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -17,6 +18,8 @@
 #include "nsXBLProtoImplMethod.h"
 #include "nsXBLPrototypeHandler.h"
 #include "nsXBLPrototypeResources.h"
+#include "mozilla/WeakPtr.h"
+#include "mozilla/StyleSheetHandle.h"
 
 class nsIAtom;
 class nsIContent;
@@ -25,19 +28,18 @@ class nsXBLAttributeEntry;
 class nsXBLBinding;
 class nsXBLProtoImplField;
 
-namespace mozilla {
-class CSSStyleSheet;
-} // namespace mozilla
-
 // *********************************************************************/
 // The XBLPrototypeBinding class
 
 // Instances of this class are owned by the nsXBLDocumentInfo object returned
 // by XBLDocumentInfo().  Consumers who want to refcount things should refcount
 // that.
-class nsXBLPrototypeBinding MOZ_FINAL
+class nsXBLPrototypeBinding final :
+  public mozilla::SupportsWeakPtr<nsXBLPrototypeBinding>
 {
 public:
+  MOZ_DECLARE_WEAKREFERENCE_TYPENAME(nsXBLPrototypeBinding)
+
   nsIContent* GetBindingElement() const { return mBinding; }
   void SetBindingElement(nsIContent* aElement);
 
@@ -89,11 +91,11 @@ public:
     }
   }
 
-  const nsCString& ClassName() const {
-    return mImplementation ? mImplementation->mClassName : EmptyCString();
+  const nsString& ClassName() const {
+    return mImplementation ? mImplementation->mClassName : EmptyString();
   }
 
-  nsresult InitClass(const nsCString& aClassName, JSContext * aContext,
+  nsresult InitClass(const nsString& aClassName, JSContext* aContext,
                      JS::Handle<JSObject*> aScriptObject,
                      JS::MutableHandle<JSObject*> aClassObject,
                      bool* aNew);
@@ -117,13 +119,13 @@ public:
 
   void SetInitialAttributes(nsIContent* aBoundElement, nsIContent* aAnonymousContent);
 
-  void AppendStyleSheet(mozilla::CSSStyleSheet* aSheet);
-  void RemoveStyleSheet(mozilla::CSSStyleSheet* aSheet);
-  void InsertStyleSheetAt(size_t aIndex, mozilla::CSSStyleSheet* aSheet);
-  mozilla::CSSStyleSheet* StyleSheetAt(size_t aIndex) const;
+  void AppendStyleSheet(mozilla::StyleSheetHandle aSheet);
+  void RemoveStyleSheet(mozilla::StyleSheetHandle aSheet);
+  void InsertStyleSheetAt(size_t aIndex, mozilla::StyleSheetHandle aSheet);
+  mozilla::StyleSheetHandle StyleSheetAt(size_t aIndex) const;
   size_t SheetCount() const;
   bool HasStyleSheets() const;
-  void AppendStyleSheetsTo(nsTArray<mozilla::CSSStyleSheet*>& aResult) const;
+  void AppendStyleSheetsTo(nsTArray<mozilla::StyleSheetHandle>& aResult) const;
 
   nsIStyleRuleProcessor* GetRuleProcessor();
 
@@ -164,6 +166,8 @@ private:
    * to indicate the first binding in a document.
    * XBLBinding_Serialize_ChromeOnlyContent indicates that
    * nsXBLPrototypeBinding::mChromeOnlyContent should be true.
+   * XBLBinding_Serialize_BindToUntrustedContent indicates that
+   * nsXBLPrototypeBinding::mBindToUntrustedContent should be true.
    */
 public:
   static nsresult ReadNewBinding(nsIObjectInputStream* aStream,
@@ -257,6 +261,7 @@ public:
                              nsIContent* aTemplChild);
 
   bool ChromeOnlyContent() { return mChromeOnlyContent; }
+  bool BindToUntrustedContent() { return mBindToUntrustedContent; }
 
   typedef nsClassHashtable<nsISupportsHashKey, nsXBLAttributeEntry> InnerAttributeTable;
 
@@ -286,11 +291,13 @@ protected:
   nsXBLProtoImpl* mImplementation; // Our prototype implementation (includes methods, properties, fields,
                                    // the constructor, and the destructor).
 
-  nsXBLPrototypeBinding* mBaseBinding; // Weak.  The docinfo will own our base binding.
+  // Weak.  The docinfo will own our base binding.
+  mozilla::WeakPtr<nsXBLPrototypeBinding> mBaseBinding;
   bool mInheritStyle;
   bool mCheckedBaseProto;
   bool mKeyHandlersRegistered;
   bool mChromeOnlyContent;
+  bool mBindToUntrustedContent;
 
   nsAutoPtr<nsXBLPrototypeResources> mResources; // If we have any resources, this will be non-null.
 
@@ -307,7 +314,7 @@ protected:
     typedef const nsIID& KeyType;
     typedef const nsIID* KeyTypePointer;
 
-    IIDHashKey(const nsIID* aKey)
+    explicit IIDHashKey(const nsIID* aKey)
       : mKey(*aKey)
     {}
     IIDHashKey(const IIDHashKey& aOther)

@@ -27,6 +27,7 @@ dictionary RTCStats {
 
 dictionary RTCRTPStreamStats : RTCStats {
   DOMString ssrc;
+  DOMString mediaType;
   DOMString remoteId;
   boolean isRemote = false;
   DOMString mediaTrackId;
@@ -114,7 +115,7 @@ dictionary RTCIceCandidatePairStats : RTCStats {
   DOMString localCandidateId;
   DOMString remoteCandidateId;
   RTCStatsIceCandidatePairState state;
-  unsigned long long mozPriority;
+  unsigned long long priority;
   boolean readable;
   boolean nominated;
   boolean selected;

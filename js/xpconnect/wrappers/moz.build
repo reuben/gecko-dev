@@ -10,6 +10,7 @@ EXPORTS += [
 
 UNIFIED_SOURCES += [
     'AccessCheck.cpp',
+    'AddonWrapper.cpp',
     'ChromeObjectWrapper.cpp',
     'FilteringWrapper.cpp',
     'WaiveXrayWrapper.cpp',
@@ -27,11 +28,9 @@ if CONFIG['_MSC_VER']:
         '-wd4661', # no suitable definition provided for explicit template instantiation request
     ]
 
-FAIL_ON_WARNINGS = True
+include('/ipc/chromium/chromium-config.mozbuild')
 
-MSVC_ENABLE_PGO = True
-
-FINAL_LIBRARY = 'xpconnect_s'
+FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
     '../../../dom/base',

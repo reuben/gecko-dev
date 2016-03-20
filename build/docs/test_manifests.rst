@@ -31,9 +31,6 @@ a11y.ini
 xpcshell.ini
    For *xpcshell* tests.
 
-webapprt.ini
-   For the *chrome* flavor of webapp runtime mochitests.
-
 .. _manifestparser_manifests:
 
 ManifestParser Manifests
@@ -128,9 +125,6 @@ dupe-manifest
 
    The value of this key is ignored.
 
-run-if
-   Run this test only if the specified condition is true.
-   See :ref:`manifest_filter_language`.
 
 skip-if
    Skip this test if the specified condition is true.

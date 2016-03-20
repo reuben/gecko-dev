@@ -17,23 +17,26 @@ namespace jsipc {
 class JavaScriptChild : public JavaScriptBase<PJavaScriptChild>
 {
   public:
-    JavaScriptChild(JSRuntime *rt);
+    explicit JavaScriptChild(JSRuntime* rt);
     virtual ~JavaScriptChild();
 
     bool init();
-    void finalize(JSFreeOp *fop);
+    void updateWeakPointers();
 
-    void drop(JSObject *obj);
+    void drop(JSObject* obj);
+
+    bool allowMessage(JSContext* cx) override { return true; }
 
   protected:
-    virtual bool isParent() { return false; }
+    virtual bool isParent() override { return false; }
+    virtual JSObject* scopeForTargetObjects() override;
 
   private:
-    bool fail(JSContext *cx, ReturnStatus *rs);
-    bool ok(ReturnStatus *rs);
+    bool fail(JSContext* cx, ReturnStatus* rs);
+    bool ok(ReturnStatus* rs);
 };
 
-} // mozilla
-} // jsipc
+} // namespace jsipc
+} // namespace mozilla
 
 #endif

@@ -16,23 +16,45 @@ var MockServices = (function () {
 
   var activeAppNotifications = Object.create(null);
 
+  window.addEventListener('mock-notification-close-event', function(e) {
+    for (var alertName in activeAlertNotifications) {
+      var notif = activeAlertNotifications[alertName];
+      if (notif.title === e.detail.title) {
+        notif.listener.observe(null, "alertfinished", null);
+        delete activeAlertNotifications[alertName];
+        delete activeAppNotifications[alertName];
+        return;
+      }
+    }
+  });
+
   var mockAlertsService = {
-    showAlertNotification: function(imageUrl, title, text, textClickable,
-                                    cookie, alertListener, name) {
+    showAlert: function(alert, alertListener) {
       var listener = SpecialPowers.wrap(alertListener);
-      activeAlertNotifications[name] = {
+      activeAlertNotifications[alert.name] = {
         listener: listener,
-        cookie: cookie
+        cookie: alert.cookie,
+        title: alert.title
       };
 
       // fake async alert show event
       if (listener) {
         setTimeout(function () {
-          listener.observe(null, "alertshow", cookie);
+          listener.observe(null, "alertshow", alert.cookie);
+        }, 100);
+        setTimeout(function () {
+          listener.observe(null, "alertclickcallback", alert.cookie);
         }, 100);
       }
+    },
 
-      // ?? SpecialPowers.wrap(alertListener).observe(null, "alertclickcallback", cookie);
+    showAlertNotification: function(imageUrl, title, text, textClickable,
+                                    cookie, alertListener, name) {
+      this.showAlert({
+        name: name,
+        cookie: cookie,
+        title: title
+      }, alertListener);
     },
 
     showAppNotification: function(aImageUrl, aTitle, aText, aAlertListener, aDetails) {
@@ -48,7 +70,8 @@ var MockServices = (function () {
         dbId: aDetails.dbId || undefined,
         dir: aDetails.dir || undefined,
         tag: aDetails.tag || undefined,
-        timestamp: aDetails.timestamp || undefined
+        timestamp: aDetails.timestamp || undefined,
+        data: aDetails.data || undefined
       };
       this.showAlertNotification(aImageUrl, aTitle, aText, true, "", listener, aDetails.id);
     },
@@ -104,6 +127,7 @@ var MockServices = (function () {
     },
 
     activeAlertNotifications: activeAlertNotifications,
+
     activeAppNotifications: activeAppNotifications,
   };
 })();

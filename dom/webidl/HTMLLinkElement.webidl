@@ -18,9 +18,10 @@ interface HTMLLinkElement : HTMLElement {
   [SetterThrows, Pure]
            attribute DOMString href;
   [SetterThrows, Pure]
-           attribute DOMString crossOrigin;
+           attribute DOMString? crossOrigin;
   [SetterThrows, Pure]
            attribute DOMString rel;
+  [PutForwards=value]
   readonly attribute DOMTokenList relList;
   [SetterThrows, Pure]
            attribute DOMString media;
@@ -28,7 +29,7 @@ interface HTMLLinkElement : HTMLElement {
            attribute DOMString hreflang;
   [SetterThrows, Pure]
            attribute DOMString type;
-  [PutForwards=value] readonly attribute DOMSettableTokenList sizes;
+  [PutForwards=value] readonly attribute DOMTokenList sizes;
 };
 HTMLLinkElement implements LinkStyle;
 
@@ -44,7 +45,12 @@ partial interface HTMLLinkElement {
 
 // http://w3c.github.io/webcomponents/spec/imports/#interface-import
 partial interface HTMLLinkElement {
-    [Pref="dom.webcomponents.enabled"]
+    [Func="nsDocument::IsWebComponentsEnabled"]
     readonly attribute Document? import;
 };
 
+// https://w3c.github.io/webappsec/specs/subresourceintegrity/#htmllinkelement-1
+partial interface HTMLLinkElement {
+  [SetterThrows]
+  attribute DOMString integrity;
+};

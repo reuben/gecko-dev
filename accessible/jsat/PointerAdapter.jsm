@@ -29,7 +29,7 @@ const MOUSE_ID = 'mouse';
 // Synthesized touch ID.
 const SYNTH_ID = -1;
 
-let PointerRelay = { // jshint ignore:line
+var PointerRelay = { // jshint ignore:line
   /**
    * A mapping of events we should be intercepting. Entries with a value of
    * |true| are used for compiling high-level gesture events. Entries with a
@@ -39,6 +39,13 @@ let PointerRelay = { // jshint ignore:line
     delete this._eventsOfInterest;
 
     switch (Utils.widgetToolkit) {
+      case 'android':
+        this._eventsOfInterest = {
+          'touchstart' : true,
+          'touchmove' : true,
+          'touchend' : true };
+        break;
+
       case 'gonk':
         this._eventsOfInterest = {
           'touchstart' : true,
@@ -46,19 +53,6 @@ let PointerRelay = { // jshint ignore:line
           'touchend' : true,
           'mousedown' : false,
           'mousemove' : false,
-          'mouseup': false,
-          'click': false };
-        break;
-
-      case 'android':
-        this._eventsOfInterest = {
-          'touchstart' : true,
-          'touchmove' : true,
-          'touchend' : true,
-          'mousemove' : true,
-          'mouseenter' : true,
-          'mouseleave' : true,
-          'mousedown' : false,
           'mouseup': false,
           'click': false };
         break;
@@ -85,12 +79,10 @@ let PointerRelay = { // jshint ignore:line
   _eventMap: {
     'touchstart' : 'pointerdown',
     'mousedown' : 'pointerdown',
-    'mouseenter' : 'pointerdown',
     'touchmove' : 'pointermove',
     'mousemove' : 'pointermove',
     'touchend' : 'pointerup',
-    'mouseup': 'pointerup',
-    'mouseleave': 'pointerup'
+    'mouseup': 'pointerup'
   },
 
   start: function PointerRelay_start(aOnPointerEvent) {
@@ -128,6 +120,11 @@ let PointerRelay = { // jshint ignore:line
       screenY: aEvent.screenY,
       target: aEvent.target
     }];
+
+    if (Utils.widgetToolkit === 'android' &&
+      changedTouches.length === 1 && changedTouches[0].identifier === 1) {
+      return;
+    }
 
     if (changedTouches.length === 1 &&
         changedTouches[0].identifier === SYNTH_ID) {

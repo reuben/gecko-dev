@@ -6,10 +6,10 @@ MARIONETTE_HEAD_JS = 'mmdb_head.js';
 
 Cu.import("resource://gre/modules/PhoneNumberUtils.jsm");
 
-let RIL = {};
+var RIL = {};
 Cu.import("resource://gre/modules/ril_consts.js", RIL);
 
-let MMS = {};
+var MMS = {};
 Cu.import("resource://gre/modules/MmsPduHelper.jsm", MMS);
 
 const DBNAME = "test_mmdb_upgradeSchema_22:" + newUUID();
@@ -40,7 +40,7 @@ const FILTER_READ_READ = 1;
 
 const DISABLE_MMS_GROUPING_FOR_RECEIVING = true;
 
-let LEGACY = {
+var LEGACY = {
   saveRecord: function(aMessageRecord, aAddresses, aCallback) {
     if (DEBUG) debug("Going to store " + JSON.stringify(aMessageRecord));
 
@@ -171,7 +171,7 @@ let LEGACY = {
         aMessageRecord.threadIdIndex = [threadId, timestamp];
         // Setup participantIdsIndex.
         aMessageRecord.participantIdsIndex = [];
-        for each (let id in participantIds) {
+        for (let id of participantIds) {
           aMessageRecord.participantIdsIndex.push([id, timestamp]);
         }
 
@@ -192,8 +192,9 @@ let LEGACY = {
             self.updateThreadByMessageChange(aMessageStore,
                                              aThreadStore,
                                              oldMessageRecord.threadId,
-                                             aMessageRecord.id,
-                                             oldMessageRecord.read);
+                                             [aMessageRecord.id],
+                                             oldMessageRecord.read ? 0 : 1,
+                                             null);
           }
         };
       };
@@ -629,7 +630,7 @@ function doVerifyDatabase(aMmdb, aExpected) {
       is(aExpected.length, 0, "remaining unmatched threads");
 
       // 5) retrieve all messages.
-      return createMessageCursor(aMmdb, {})
+      return createMessageCursor(aMmdb)
         .then(function(aValues) {
           let [errorCode, domMessages] = aValues;
           is(errorCode, 0, "errorCode");

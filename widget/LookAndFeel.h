@@ -12,8 +12,15 @@
 
 #include "nsDebug.h"
 #include "nsColor.h"
+#include "nsTArray.h"
 
 struct gfxFontStyle;
+
+struct LookAndFeelInt
+{
+  int32_t id;
+  int32_t value;
+};
 
 namespace mozilla {
 
@@ -39,6 +46,7 @@ public:
     eColorID_TextForeground,
     eColorID_TextSelectBackground,
     eColorID_TextSelectForeground,
+    eColorID_TextSelectForegroundCustom,
     eColorID_TextSelectBackgroundDisabled,
     eColorID_TextSelectBackgroundAttention,
     eColorID_TextHighlightBackground,
@@ -125,10 +133,14 @@ public:
 
     // colors needed by the Mac OS X theme
 
+    // foreground color of :hover:active buttons
+    eColorID__moz_mac_buttonactivetext,
     // background color of chrome toolbars in active windows
     eColorID__moz_mac_chrome_active,
     // background color of chrome toolbars in inactive windows
     eColorID__moz_mac_chrome_inactive,
+    // foreground color of default buttons
+    eColorID__moz_mac_defaultbuttontext,
     //ring around text fields and lists
     eColorID__moz_mac_focusring,
     //colour used when mouse is over a menu item
@@ -153,7 +165,7 @@ public:
 
     // Hyperlink color extracted from the system, not affected by the
     // browser.anchor_color user pref.
-    // There is no OS-specified safe background color for this text, 
+    // There is no OS-specified safe background color for this text,
     // but it is used regularly within Windows and the Gnome DE on Dialog and
     // Window colors.
     eColorID__moz_nativehyperlinktext,
@@ -161,6 +173,9 @@ public:
     // Combo box widgets
     eColorID__moz_comboboxtext,
     eColorID__moz_combobox,
+
+    // GtkInfoBar
+    eColorID__moz_gtk_info_bar_text,
 
     // keep this one last, please
     eColorID_LAST_COLOR
@@ -381,18 +396,25 @@ public:
      * is shown.
      */
      eIntID_PhysicalHomeButton,
- 
+
      /*
       * Controls whether overlay scrollbars display when the user moves
       * the mouse in a scrollable frame.
       */
      eIntID_ScrollbarDisplayOnMouseMove,
- 
+
      /*
       * Overlay scrollbar animation constants.
       */
      eIntID_ScrollbarFadeBeginDelay,
-     eIntID_ScrollbarFadeDuration
+     eIntID_ScrollbarFadeDuration,
+      
+     /**
+      * Distance in pixels to offset the context menu from the cursor
+      * on open.
+      */
+     eIntID_ContextMenuOffsetVertical,
+     eIntID_ContextMenuOffsetHorizontal
   };
 
   /**
@@ -418,6 +440,7 @@ public:
     eOperatingSystemVersion_WindowsVista,
     eOperatingSystemVersion_Windows7,
     eOperatingSystemVersion_Windows8,
+    eOperatingSystemVersion_Windows10,
     eOperatingSystemVersion_Unknown
   };
 
@@ -432,7 +455,7 @@ public:
   enum {
     // single arrow at each end
     eScrollArrowStyle_Single =
-      eScrollArrow_StartBackward | eScrollArrow_EndForward, 
+      eScrollArrow_StartBackward | eScrollArrow_EndForward,
     // both arrows at bottom/right, none at top/left
     eScrollArrowStyle_BothAtBottom =
       eScrollArrow_EndBackward | eScrollArrow_EndForward,
@@ -502,6 +525,15 @@ public:
    *   color value.
    */
   static nsresult GetColor(ColorID aID, nscolor* aResult);
+
+   /**
+   * This variant of GetColor() takes an extra Boolean parameter that allows
+   * the caller to ask that hard-coded color values be substituted for
+   * native colors (used when it is desireable to hide system colors to
+   * avoid system fingerprinting).
+   */
+  static nsresult GetColor(ColorID aID, bool aUseStandinsForNativeColors,
+                           nscolor* aResult);
 
   /**
    * GetInt() and GetFloat() return a int or float value for aID.  The result
@@ -578,6 +610,13 @@ public:
    * cached data would be released.
    */
   static void Refresh();
+
+  /**
+   * If the implementation is caching values, these accessors allow the
+   * cache to be exported and imported.
+   */
+  static nsTArray<LookAndFeelInt> GetIntCache();
+  static void SetIntCache(const nsTArray<LookAndFeelInt>& aLookAndFeelIntCache);
 };
 
 } // namespace mozilla
@@ -587,6 +626,12 @@ public:
 // (ie. a colored text keeps its colors  when selected).
 // Of course if other plaforms work like the Mac, they can use it too.
 #define NS_DONT_CHANGE_COLOR 	NS_RGB(0x01, 0x01, 0x01)
+
+// Similar with NS_DONT_CHANGE_COLOR, except NS_DONT_CHANGE_COLOR would returns
+// complementary color if fg color is same as bg color.
+// NS_CHANGE_COLOR_IF_SAME_AS_BG would returns eColorID_TextSelectForegroundCustom if
+// fg and bg color are the same.
+#define NS_CHANGE_COLOR_IF_SAME_AS_BG NS_RGB(0x02, 0x02, 0x02)
 
 // ---------------------------------------------------------------------
 //  Special colors for eColorID_IME* and eColorID_SpellCheckerUnderline

@@ -7,6 +7,11 @@
 #include "mozilla/Compression.h"
 #include "mozilla/CheckedInt.h"
 
+// Without including <string>, MSVC 2015 complains about e.g. the impossibility
+// to convert `const void* const` to `void*` when calling memchr from
+// corecrt_memory.h.
+#include <string>
+
 using namespace mozilla::Compression;
 
 namespace {
@@ -48,7 +53,7 @@ LZ4::decompress(const char* aSource, char* aDest, size_t aOutputSize)
 
 bool
 LZ4::decompress(const char* aSource, size_t aInputSize, char* aDest,
-                size_t aMaxOutputSize, size_t *aOutputSize)
+                size_t aMaxOutputSize, size_t* aOutputSize)
 {
   CheckedInt<int> maxOutputSizeChecked = aMaxOutputSize;
   MOZ_ASSERT(maxOutputSizeChecked.isValid());

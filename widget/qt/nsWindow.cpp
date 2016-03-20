@@ -40,7 +40,6 @@
 #include "mozqwidget.h"
 
 #include "nsIdleService.h"
-#include "nsRenderingContext.h"
 #include "nsIRollupListener.h"
 #include "nsWidgetsCID.h"
 #include "nsQtKeyUtils.h"
@@ -89,8 +88,8 @@ static bool sAltGrModifier = false;
 
 static void find_first_visible_parent(QWindow* aItem, QWindow*& aVisibleItem);
 static bool is_mouse_in_window (MozQWidget* aWindow, double aMouseX, double aMouseY);
-static bool isContextMenuKeyEvent(const QKeyEvent *qe);
-static void InitKeyEvent(WidgetKeyboardEvent &aEvent, QKeyEvent *aQEvent);
+
+NS_IMPL_ISUPPORTS_INHERITED0(nsWindow, nsBaseWidget)
 
 nsWindow::nsWindow()
 {
@@ -134,18 +133,17 @@ nsWindow::~nsWindow()
 }
 
 nsresult
-nsWindow::Create(nsIWidget        *aParent,
-                 nsNativeWidget    aNativeParent,
-                 const nsIntRect  &aRect,
-                 nsDeviceContext *aContext,
-                 nsWidgetInitData *aInitData)
+nsWindow::Create(nsIWidget* aParent,
+                 nsNativeWidget aNativeParent,
+                 const LayoutDeviceIntRect& aRect,
+                 nsWidgetInitData* aInitData)
 {
     // only set the base parent if we're not going to be a dialog or a
     // toplevel
     nsIWidget *baseParent = aParent;
 
     // initialize all the common bits of this class
-    BaseCreate(baseParent, aRect, aContext, aInitData);
+    BaseCreate(baseParent, aInitData);
 
     mVisible = true;
 
@@ -272,7 +270,7 @@ nsWindow::Destroy(void)
     if (rollupListener) {
         nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
         if (static_cast<nsIWidget *>(this) == rollupWidget) {
-            rollupListener->Rollup(0, nullptr, nullptr);
+            rollupListener->Rollup(0, false, nullptr, nullptr);
         }
     }
 
@@ -599,7 +597,7 @@ nsWindow::ConfigureChildren(const nsTArray<nsIWidget::Configuration>& aConfigura
     for (uint32_t i = 0; i < aConfigurations.Length(); ++i) {
         const Configuration& configuration = aConfigurations[i];
 
-        nsWindow* w = static_cast<nsWindow*>(configuration.mChild);
+        nsWindow* w = static_cast<nsWindow*>(configuration.mChild.get());
         NS_ASSERTION(w->GetParent() == this,
                      "Configured widget is not a child");
 
@@ -615,10 +613,10 @@ nsWindow::ConfigureChildren(const nsTArray<nsIWidget::Configuration>& aConfigura
 }
 
 NS_IMETHODIMP
-nsWindow::Invalidate(const nsIntRect &aRect)
+nsWindow::Invalidate(const LayoutDeviceIntRect& aRect)
 {
     LOGDRAW(("Invalidate (rect) [%p,%p]: %d %d %d %d\n", (void *)this,
-             (void*)mWidget,aRect.x, aRect.y, aRect.width, aRect.height));
+             (void*)mWidget, aRect.x, aRect.y, aRect.width, aRect.height));
 
     if (!mWidget) {
         return NS_OK;
@@ -629,15 +627,15 @@ nsWindow::Invalidate(const nsIntRect &aRect)
     return NS_OK;
 }
 
-nsIntPoint
+LayoutDeviceIntPoint
 nsWindow::WidgetToScreenOffset()
 {
-    NS_ENSURE_TRUE(mWidget, nsIntPoint(0,0));
+    NS_ENSURE_TRUE(mWidget, LayoutDeviceIntPoint(0,0));
 
     QPoint origin(0, 0);
     origin = mWidget->mapToGlobal(origin);
 
-    return nsIntPoint(origin.x(), origin.y());
+    return LayoutDeviceIntPoint(origin.x(), origin.y());
 }
 
 void*
@@ -661,6 +659,15 @@ nsWindow::GetNativeData(uint32_t aDataType)
     case NS_NATIVE_GRAPHIC:
     case NS_NATIVE_SHELLWIDGET: {
         break;
+    }
+    case NS_RAW_NATIVE_IME_CONTEXT: {
+        void* pseudoIMEContext = GetPseudoIMEContext();
+        if (pseudoIMEContext) {
+            return pseudoIMEContext;
+        }
+        // Our qt widget looks like using only one context per process.
+        // However, it's better to set the context's pointer.
+        return qApp->inputMethod();
     }
     default:
         NS_WARNING("nsWindow::GetNativeData called with bad value");
@@ -714,10 +721,6 @@ NS_IMETHODIMP_(InputContext)
 nsWindow::GetInputContext()
 {
     mInputContext.mIMEState.mOpen = IMEState::OPEN_STATE_NOT_SUPPORTED;
-    // Our qt widget looks like using only one context per process.
-    // However, it's better to set the context's pointer.
-    mInputContext.mNativeIMEContext = qApp->inputMethod();
-
     return mInputContext;
 }
 
@@ -735,7 +738,7 @@ nsWindow::ReparentNativeWidget(nsIWidget *aNewParent)
 }
 
 NS_IMETHODIMP
-nsWindow::MakeFullScreen(bool aFullScreen)
+nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen*)
 {
     NS_ENSURE_TRUE(mWidget, NS_ERROR_FAILURE);
 
@@ -807,7 +810,7 @@ nsWindow::GetGLFrameBufferFormat()
     return LOCAL_GL_NONE;
 }
 
-TemporaryRef<DrawTarget>
+already_AddRefed<DrawTarget>
 nsWindow::StartRemoteDrawing()
 {
     if (!mWidget) {
@@ -819,8 +822,8 @@ nsWindow::StartRemoteDrawing()
     Screen* screen = DefaultScreenOfDisplay(dpy);
     Visual* defaultVisual = DefaultVisualOfScreen(screen);
     gfxASurface* surf = new gfxXlibSurface(dpy, mWidget->winId(), defaultVisual,
-                                           gfxIntSize(mWidget->width(),
-                                                      mWidget->height()));
+                                           IntSize(mWidget->width(),
+                                                   mWidget->height()));
 
     IntSize size(surf->GetSize().width, surf->GetSize().height);
     if (size.width <= 0 || size.height <= 0) {
@@ -873,7 +876,8 @@ nsWindow::OnPaint()
 
     switch (GetLayerManager()->GetBackendType()) {
         case mozilla::layers::LayersBackend::LAYERS_CLIENT: {
-            nsIntRegion region(nsIntRect(0, 0, mWidget->width(), mWidget->height()));
+            LayoutDeviceIntRegion region(
+              LayoutDeviceIntRect(0, 0, mWidget->width(), mWidget->height()));
             listener->PaintWindow(this, region);
             break;
         }
@@ -907,7 +911,7 @@ nsWindow::moveEvent(QMoveEvent* aEvent)
 nsEventStatus
 nsWindow::resizeEvent(QResizeEvent* aEvent)
 {
-    nsIntRect rect;
+    LayoutDeviceIntRect rect;
 
     // Generate XPFE resize event
     GetBounds(rect);
@@ -1001,15 +1005,14 @@ nsWindow::mousePressEvent(QMouseEvent* aEvent)
         return nsEventStatus_eIgnore;
     }
 
-    WidgetMouseEvent event(true, NS_MOUSE_BUTTON_DOWN, this,
-                           WidgetMouseEvent::eReal);
+    WidgetMouseEvent event(true, eMouseDown, this, WidgetMouseEvent::eReal);
     InitMouseEvent(event, aEvent, 1);
     nsEventStatus status = DispatchEvent(&event);
 
     // Right click on linux should also pop up a context menu.
     if (event.button == WidgetMouseEvent::eRightButton &&
         MOZ_LIKELY(!mIsDestroyed)) {
-        WidgetMouseEvent contextMenuEvent(true, NS_CONTEXTMENU, this,
+        WidgetMouseEvent contextMenuEvent(true, eContextMenu, this,
                                           WidgetMouseEvent::eReal);
         InitMouseEvent(contextMenuEvent, aEvent, 1);
         DispatchEvent(&contextMenuEvent, status);
@@ -1027,8 +1030,7 @@ nsWindow::mouseReleaseEvent(QMouseEvent* aEvent)
     if (!IsAcceptedButton(aEvent->button()))
         return nsEventStatus_eIgnore;
 
-    WidgetMouseEvent event(true, NS_MOUSE_BUTTON_UP, this,
-                           WidgetMouseEvent::eReal);
+    WidgetMouseEvent event(true, eMouseUp, this, WidgetMouseEvent::eReal);
     InitMouseEvent(event, aEvent, 1);
     return DispatchEvent(&event);
 }
@@ -1042,7 +1044,7 @@ nsWindow::mouseDoubleClickEvent(QMouseEvent* aEvent)
     if (!IsAcceptedButton(aEvent->button()))
         return nsEventStatus_eIgnore;
 
-    WidgetMouseEvent event(true, NS_MOUSE_DOUBLECLICK, this,
+    WidgetMouseEvent event(true, eMouseDoubleClick, this,
                            WidgetMouseEvent::eReal);
     InitMouseEvent(event, aEvent, 2);
     return DispatchEvent(&event);
@@ -1078,6 +1080,57 @@ nsWindow::focusOutEvent(QFocusEvent* aEvent)
     return nsEventStatus_eIgnore;
 }
 
+static bool
+IsContextMenuKeyEvent(const QKeyEvent* aQEvent)
+{
+    if (aQEvent->modifiers() & (Qt::ControlModifier |
+                                Qt::AltModifier |
+                                Qt::MetaModifier)) {
+        return false;
+    }
+
+    bool isShift = aQEvent->modifiers() & Qt::ShiftModifier;
+    uint32_t keyCode = QtKeyCodeToDOMKeyCode(aQEvent->key());
+    return (keyCode == NS_VK_F10 && isShift) ||
+           (keyCode == NS_VK_CONTEXT_MENU && !isShift);
+}
+
+static void
+InitKeyEvent(WidgetKeyboardEvent& aEvent, QKeyEvent* aQEvent)
+{
+    aEvent.InitBasicModifiers(aQEvent->modifiers() & Qt::ControlModifier,
+                              aQEvent->modifiers() & Qt::AltModifier,
+                              aQEvent->modifiers() & Qt::ShiftModifier,
+                              aQEvent->modifiers() & Qt::MetaModifier);
+
+    aEvent.mIsRepeat =
+        (aEvent.mMessage == eKeyDown || aEvent.mMessage == eKeyPress) &&
+        aQEvent->isAutoRepeat();
+    aEvent.time = 0;
+
+    if (sAltGrModifier) {
+        aEvent.modifiers |= (MODIFIER_CONTROL | MODIFIER_ALT);
+    }
+
+    if (aQEvent->text().length() && aQEvent->text()[0].isPrint()) {
+        aEvent.charCode = (int32_t) aQEvent->text()[0].unicode();
+        aEvent.keyCode = 0;
+        aEvent.mKeyNameIndex = KEY_NAME_INDEX_PrintableKey;
+    } else {
+        aEvent.charCode = 0;
+        aEvent.keyCode = QtKeyCodeToDOMKeyCode(aQEvent->key());
+        aEvent.mKeyNameIndex = QtKeyCodeToDOMKeyNameIndex(aQEvent->key());
+    }
+
+    aEvent.mCodeNameIndex = ScanCodeToDOMCodeNameIndex(aQEvent->nativeScanCode());
+
+    // The transformations above and in qt for the keyval are not invertible
+    // so link to the QKeyEvent (which will vanish soon after return from the
+    // event callback) to give plugins access to hardware_keycode and state.
+    // (An XEvent would be nice but the QKeyEvent is good enough.)
+    aEvent.mPluginEvent.Copy(*aQEvent);
+}
+
 nsEventStatus
 nsWindow::keyPressEvent(QKeyEvent* aEvent)
 {
@@ -1090,105 +1143,25 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
         sAltGrModifier = true;
     }
 
-    CodeNameIndex codeNameIndex =
-        ScanCodeToDOMCodeNameIndex(aEvent->nativeScanCode());
-
-#ifdef MOZ_X11
-    // before we dispatch a key, check if it's the context menu key.
+    // Before we dispatch a key, check if it's the context menu key.
     // If so, send a context menu key event instead.
-    if (isContextMenuKeyEvent(aEvent)) {
-        WidgetMouseEvent contextMenuEvent(true, NS_CONTEXTMENU, this,
+    if (IsContextMenuKeyEvent(aEvent)) {
+        WidgetMouseEvent contextMenuEvent(true, eContextMenu, this,
                                           WidgetMouseEvent::eReal,
                                           WidgetMouseEvent::eContextMenuKey);
-        //keyEventToContextMenuEvent(&event, &contextMenuEvent);
         return DispatchEvent(&contextMenuEvent);
     }
 
-    uint32_t domCharCode = 0;
+    //:TODO: fix shortcuts hebrew for non X11,
+    //see Bug 562195##51
+
     uint32_t domKeyCode = QtKeyCodeToDOMKeyCode(aEvent->key());
 
-    // get keymap and modifier map from the Xserver
-    Display *display = gfxQtPlatform::GetXDisplay(mWidget);
-    int x_min_keycode = 0, x_max_keycode = 0, xkeysyms_per_keycode;
-    XDisplayKeycodes(display, &x_min_keycode, &x_max_keycode);
-    XModifierKeymap *xmodmap = XGetModifierMapping(display);
-    if (!xmodmap)
-        return nsEventStatus_eIgnore;
-
-    KeySym *xkeymap = XGetKeyboardMapping(display, x_min_keycode, x_max_keycode - x_min_keycode,
-                                          &xkeysyms_per_keycode);
-    if (!xkeymap) {
-        XFreeModifiermap(xmodmap);
-        return nsEventStatus_eIgnore;
-    }
-
-    // create modifier masks
-    qint32 shift_mask = 0, shift_lock_mask = 0, caps_lock_mask = 0, num_lock_mask = 0;
-
-    for (int i = 0; i < 8 * xmodmap->max_keypermod; ++i) {
-        qint32 maskbit = 1 << (i / xmodmap->max_keypermod);
-        KeyCode modkeycode = xmodmap->modifiermap[i];
-        if (modkeycode == NoSymbol) {
-            continue;
-        }
-
-        quint32 mapindex = (modkeycode - x_min_keycode) * xkeysyms_per_keycode;
-        for (int j = 0; j < xkeysyms_per_keycode; ++j) {
-            KeySym modkeysym = xkeymap[mapindex + j];
-            switch (modkeysym) {
-                case XK_Num_Lock:
-                    num_lock_mask |= maskbit;
-                    break;
-                case XK_Caps_Lock:
-                    caps_lock_mask |= maskbit;
-                    break;
-                case XK_Shift_Lock:
-                    shift_lock_mask |= maskbit;
-                    break;
-                case XK_Shift_L:
-                case XK_Shift_R:
-                    shift_mask |= maskbit;
-                    break;
-            }
-        }
-    }
-    // indicate whether is down or not
-    bool shift_state = ((shift_mask & aEvent->nativeModifiers()) != 0) ^
-                          (bool)(shift_lock_mask & aEvent->nativeModifiers());
-    bool capslock_state = (bool)(caps_lock_mask & aEvent->nativeModifiers());
-
-    // try to find a keysym that we can translate to a DOMKeyCode
-    // this is needed because some of Qt's keycodes cannot be translated
-    // TODO: use US keyboard keymap instead of localised keymap
-    if (!domKeyCode &&
-        aEvent->nativeScanCode() >= (quint32)x_min_keycode &&
-        aEvent->nativeScanCode() <= (quint32)x_max_keycode) {
-        int index = (aEvent->nativeScanCode() - x_min_keycode) * xkeysyms_per_keycode;
-        for(int i = 0; (i < xkeysyms_per_keycode) && (domKeyCode == (quint32)NoSymbol); ++i) {
-            domKeyCode = QtKeyCodeToDOMKeyCode(xkeymap[index + i]);
-        }
-    }
-
-    // store character in domCharCode
-    if (aEvent->text().length() && aEvent->text()[0].isPrint())
-        domCharCode = (int32_t) aEvent->text()[0].unicode();
-
-    KeyNameIndex keyNameIndex =
-        domCharCode ? KEY_NAME_INDEX_PrintableKey :
-                      QtKeyCodeToDOMKeyNameIndex(aEvent->key());
-
-    // If the key isn't autorepeat, we need to send the initial down event
     if (!aEvent->isAutoRepeat() && !IsKeyDown(domKeyCode)) {
-        // send the key down event
-
         SetKeyDownFlag(domKeyCode);
 
-        WidgetKeyboardEvent downEvent(true, NS_KEY_DOWN, this);
+        WidgetKeyboardEvent downEvent(true, eKeyDown, this);
         InitKeyEvent(downEvent, aEvent);
-
-        downEvent.keyCode = domKeyCode;
-        downEvent.mKeyNameIndex = keyNameIndex;
-        downEvent.mCodeNameIndex = codeNameIndex;
 
         nsEventStatus status = DispatchEvent(&downEvent);
 
@@ -1204,8 +1177,8 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
         }
     }
 
-    // Don't pass modifiers as NS_KEY_PRESS events.
-    // Instead of selectively excluding some keys from NS_KEY_PRESS events,
+    // Don't pass modifiers as eKeyPress events.
+    // Instead of selectively excluding some keys from eKeyPress events,
     // we instead selectively include (as per MSDN spec
     // ( http://msdn.microsoft.com/en-us/library/system.windows.forms.control.keypress%28VS.71%29.aspx );
     // no official spec covers KeyPress events).
@@ -1214,7 +1187,6 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
         aEvent->key() == Qt::Key_Meta    ||
         aEvent->key() == Qt::Key_Alt     ||
         aEvent->key() == Qt::Key_AltGr) {
-
         return nsEventStatus_eIgnore;
     }
 
@@ -1236,225 +1208,30 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
             return DispatchCommandEvent(nsGkAtoms::Home);
         case Qt::Key_Copy:
         case Qt::Key_F16: // F16, F20, F18, F14 are old keysyms for Copy Cut Paste Undo
-            return DispatchContentCommandEvent(NS_CONTENT_COMMAND_COPY);
+            return DispatchContentCommandEvent(eContentCommandCopy);
         case Qt::Key_Cut:
         case Qt::Key_F20:
-            return DispatchContentCommandEvent(NS_CONTENT_COMMAND_CUT);
+            return DispatchContentCommandEvent(eContentCommandCut);
         case Qt::Key_Paste:
         case Qt::Key_F18:
         case Qt::Key_F9:
-            return DispatchContentCommandEvent(NS_CONTENT_COMMAND_PASTE);
+            return DispatchContentCommandEvent(eContentCommandPaste);
         case Qt::Key_F14:
-            return DispatchContentCommandEvent(NS_CONTENT_COMMAND_UNDO);
+            return DispatchContentCommandEvent(eContentCommandUndo);
     }
 
     // Qt::Key_Redo and Qt::Key_Undo are not available yet.
     if (aEvent->nativeVirtualKey() == 0xff66) {
-        return DispatchContentCommandEvent(NS_CONTENT_COMMAND_REDO);
+        return DispatchContentCommandEvent(eContentCommandRedo);
     }
     if (aEvent->nativeVirtualKey() == 0xff65) {
-        return DispatchContentCommandEvent(NS_CONTENT_COMMAND_UNDO);
+        return DispatchContentCommandEvent(eContentCommandUndo);
     }
 
-    WidgetKeyboardEvent event(true, NS_KEY_PRESS, this);
+    WidgetKeyboardEvent event(true, eKeyPress, this);
     InitKeyEvent(event, aEvent);
-
-    // If there is no charcode attainable from the text, try to
-    // generate it from the keycode. Check shift state for case
-    // Also replace the charcode if ControlModifier is the only
-    // pressed Modifier
-    if ((!domCharCode) &&
-        (QGuiApplication::keyboardModifiers() &
-        (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
-
-        // get a character from X11 key map
-        KeySym keysym = aEvent->nativeVirtualKey();
-        if (keysym) {
-            domCharCode = (uint32_t) keysym2ucs(keysym);
-            if (domCharCode == -1 || !QChar((quint32)domCharCode).isPrint()) {
-                domCharCode = 0;
-            }
-        }
-
-        // if Ctrl is pressed and domCharCode is not a ASCII character
-        if (domCharCode > 0xFF && (QGuiApplication::keyboardModifiers() & Qt::ControlModifier)) {
-            // replace Unicode character
-            int index = (aEvent->nativeScanCode() - x_min_keycode) * xkeysyms_per_keycode;
-            for (int i = 0; i < xkeysyms_per_keycode; ++i) {
-                if (xkeymap[index + i] <= 0xFF && !shift_state) {
-                    domCharCode = (uint32_t) QChar::toLower((uint) xkeymap[index + i]);
-                    break;
-                }
-            }
-        }
-
-    } else { // The key event should cause a character input.
-             // At that time, we need to reset the modifiers
-             // because nsEditor will not accept a key event
-             // for text input if one or more modifiers are set.
-        event.modifiers &= ~(MODIFIER_CONTROL |
-                             MODIFIER_ALT |
-                             MODIFIER_META);
-    }
-
-    KeySym keysym = NoSymbol;
-    int index = (aEvent->nativeScanCode() - x_min_keycode) * xkeysyms_per_keycode;
-    for (int i = 0; i < xkeysyms_per_keycode; ++i) {
-        if (xkeymap[index + i] == aEvent->nativeVirtualKey()) {
-            if ((i % 2) == 0) { // shifted char
-                keysym = xkeymap[index + i + 1];
-                break;
-            } else { // unshifted char
-                keysym = xkeymap[index + i - 1];
-                break;
-            }
-        }
-        if (xkeysyms_per_keycode - 1 == i) {
-            qWarning() << "Symbol '" << aEvent->nativeVirtualKey() << "' not found";
-        }
-    }
-    QChar unshiftedChar(domCharCode);
-    long ucs = keysym2ucs(keysym);
-    ucs = ucs == -1 ? 0 : ucs;
-    QChar shiftedChar((uint)ucs);
-
-    // append alternativeCharCodes if modifier is pressed
-    // append an additional alternativeCharCodes if domCharCode is not a Latin character
-    // and if one of these modifiers is pressed (i.e. Ctrl, Alt, Meta)
-    if (domCharCode &&
-        (QGuiApplication::keyboardModifiers() &
-        (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
-
-        event.charCode = domCharCode;
-        event.keyCode = 0;
-        AlternativeCharCode altCharCode(0, 0);
-        // if character has a lower and upper representation
-        if ((unshiftedChar.isUpper() || unshiftedChar.isLower()) &&
-            unshiftedChar.toLower() == shiftedChar.toLower()) {
-            if (shift_state ^ capslock_state) {
-                altCharCode.mUnshiftedCharCode = (uint32_t) QChar::toUpper((uint)domCharCode);
-                altCharCode.mShiftedCharCode = (uint32_t) QChar::toLower((uint)domCharCode);
-            } else {
-                altCharCode.mUnshiftedCharCode = (uint32_t) QChar::toLower((uint)domCharCode);
-                altCharCode.mShiftedCharCode = (uint32_t) QChar::toUpper((uint)domCharCode);
-            }
-        } else {
-            altCharCode.mUnshiftedCharCode = (uint32_t) unshiftedChar.unicode();
-            altCharCode.mShiftedCharCode = (uint32_t) shiftedChar.unicode();
-        }
-
-        // append alternative char code to event
-        if ((altCharCode.mUnshiftedCharCode && altCharCode.mUnshiftedCharCode != domCharCode) ||
-            (altCharCode.mShiftedCharCode && altCharCode.mShiftedCharCode != domCharCode)) {
-            event.alternativeCharCodes.AppendElement(altCharCode);
-        }
-
-        // check if the alternative char codes are latin-1
-        if (altCharCode.mUnshiftedCharCode > 0xFF || altCharCode.mShiftedCharCode > 0xFF) {
-            altCharCode.mUnshiftedCharCode = altCharCode.mShiftedCharCode = 0;
-
-            // find latin char for keycode
-            KeySym keysym = NoSymbol;
-            int index = (aEvent->nativeScanCode() - x_min_keycode) * xkeysyms_per_keycode;
-            // find first shifted and unshifted Latin-Char in XKeyMap
-            for (int i = 0; i < xkeysyms_per_keycode; ++i) {
-                keysym = xkeymap[index + i];
-                if (keysym && keysym <= 0xFF) {
-                    if ((shift_state && (i % 2 == 1)) ||
-                        (!shift_state && (i % 2 == 0))) {
-                        altCharCode.mUnshiftedCharCode = altCharCode.mUnshiftedCharCode ?
-                            altCharCode.mUnshiftedCharCode :
-                            keysym;
-                    } else {
-                        altCharCode.mShiftedCharCode = altCharCode.mShiftedCharCode ?
-                            altCharCode.mShiftedCharCode :
-                            keysym;
-                    }
-                    if (altCharCode.mUnshiftedCharCode && altCharCode.mShiftedCharCode) {
-                        break;
-                    }
-                }
-            }
-
-            if (altCharCode.mUnshiftedCharCode || altCharCode.mShiftedCharCode) {
-                event.alternativeCharCodes.AppendElement(altCharCode);
-            }
-        }
-    } else {
-        event.charCode = domCharCode;
-    }
-
-    if (xmodmap) {
-        XFreeModifiermap(xmodmap);
-    }
-    if (xkeymap) {
-        XFree(xkeymap);
-    }
-
-    event.keyCode = domCharCode ? 0 : domKeyCode;
-    event.mKeyNameIndex = keyNameIndex;
-    event.mCodeNameIndex = codeNameIndex;
-    // send the key press event
+    // Seend the key press event
     return DispatchEvent(&event);
-#else
-
-    //:TODO: fix shortcuts hebrew for non X11,
-    //see Bug 562195##51
-
-    // before we dispatch a key, check if it's the context menu key.
-    // If so, send a context menu key event instead.
-    if (isContextMenuKeyEvent(aEvent)) {
-        WidgetMouseEvent contextMenuEvent(true, NS_CONTEXTMENU, this,
-                                          WidgetMouseEvent::eReal,
-                                          WidgetMouseEvent::eContextMenuKey);
-        //keyEventToContextMenuEvent(&event, &contextMenuEvent);
-        return DispatchEvent(&contextMenuEvent);
-    }
-
-    uint32_t domCharCode = 0;
-    uint32_t domKeyCode = QtKeyCodeToDOMKeyCode(aEvent->key());
-
-    if (aEvent->text().length() && aEvent->text()[0].isPrint()) {
-        domCharCode = (int32_t) aEvent->text()[0].unicode();
-    }
-
-    KeyNameIndex keyNameIndex =
-        domCharCode ? KEY_NAME_INDEX_PrintableKey :
-                      QtKeyCodeToDOMKeyNameIndex(aEvent->key());
-
-    // If the key isn't autorepeat, we need to send the initial down event
-    if (!aEvent->isAutoRepeat() && !IsKeyDown(domKeyCode)) {
-        // send the key down event
-
-        SetKeyDownFlag(domKeyCode);
-
-        WidgetKeyboardEvent downEvent(true, NS_KEY_DOWN, this);
-        InitKeyEvent(downEvent, aEvent);
-
-        downEvent.keyCode = domKeyCode;
-        downEvent.mKeyNameIndex = keyNameIndex;
-        downEvent.mCodeNameIndex = codeNameIndex;
-
-        nsEventStatus status = DispatchEvent(&downEvent);
-
-        // If prevent default on keydown, don't dispatch keypress event
-        if (status == nsEventStatus_eConsumeNoDefault) {
-            return nsEventStatus_eConsumeNoDefault;
-        }
-    }
-
-    WidgetKeyboardEvent event(true, NS_KEY_PRESS, this);
-    InitKeyEvent(event, aEvent);
-
-    event.charCode = domCharCode;
-
-    event.keyCode = domCharCode ? 0 : domKeyCode;
-    event.mKeyNameIndex = keyNameIndex;
-    event.mCodeNameIndex = codeNameIndex;
-
-    // send the key press event
-    return DispatchEvent(&event);
-#endif
 }
 
 nsEventStatus
@@ -1465,51 +1242,18 @@ nsWindow::keyReleaseEvent(QKeyEvent* aEvent)
     // The user has done something.
     UserActivity();
 
-    if (isContextMenuKeyEvent(aEvent)) {
+    if (IsContextMenuKeyEvent(aEvent)) {
         // er, what do we do here? DoDefault or NoDefault?
         return nsEventStatus_eConsumeDoDefault;
     }
 
-    uint32_t domKeyCode = QtKeyCodeToDOMKeyCode(aEvent->key());
-
-#ifdef MOZ_X11
-    if (!domKeyCode) {
-        // get keymap from the Xserver
-        Display *display = gfxQtPlatform::GetXDisplay(mWidget);
-        int x_min_keycode = 0, x_max_keycode = 0, xkeysyms_per_keycode;
-        XDisplayKeycodes(display, &x_min_keycode, &x_max_keycode);
-        KeySym *xkeymap = XGetKeyboardMapping(display, x_min_keycode, x_max_keycode - x_min_keycode,
-                                              &xkeysyms_per_keycode);
-
-        if (aEvent->nativeScanCode() >= (quint32)x_min_keycode &&
-            aEvent->nativeScanCode() <= (quint32)x_max_keycode) {
-            int index = (aEvent->nativeScanCode() - x_min_keycode) * xkeysyms_per_keycode;
-            for(int i = 0; (i < xkeysyms_per_keycode) && (domKeyCode == (quint32)NoSymbol); ++i) {
-                domKeyCode = QtKeyCodeToDOMKeyCode(xkeymap[index + i]);
-            }
-        }
-
-        if (xkeymap) {
-            XFree(xkeymap);
-        }
-    }
-#endif // MOZ_X11
-
     // send the key event as a key up event
-    WidgetKeyboardEvent event(true, NS_KEY_UP, this);
+    WidgetKeyboardEvent event(true, eKeyUp, this);
     InitKeyEvent(event, aEvent);
 
     if (aEvent->key() == Qt::Key_AltGr) {
         sAltGrModifier = false;
     }
-
-    event.keyCode = domKeyCode;
-    event.mKeyNameIndex =
-        (aEvent->text().length() && aEvent->text()[0].isPrint()) ?
-            KEY_NAME_INDEX_PrintableKey :
-            QtKeyCodeToDOMKeyNameIndex(aEvent->key());
-    event.mCodeNameIndex =
-        ScanCodeToDOMCodeNameIndex(aEvent->nativeScanCode());
 
     // unset the key down flag
     ClearKeyDownFlag(event.keyCode);
@@ -1521,7 +1265,7 @@ nsEventStatus
 nsWindow::wheelEvent(QWheelEvent* aEvent)
 {
     // check to see if we should rollup
-    WidgetWheelEvent wheelEvent(true, NS_WHEEL_WHEEL, this);
+    WidgetWheelEvent wheelEvent(true, eWheel, this);
     wheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
 
     // negative values for aEvent->delta indicate downward scrolling;
@@ -1628,7 +1372,8 @@ nsWindow::DispatchDeactivateEventOnTopLevelWindow(void)
 }
 
 void
-nsWindow::DispatchResizeEvent(nsIntRect &aRect, nsEventStatus &aStatus)
+nsWindow::DispatchResizeEvent(LayoutDeviceIntRect& aRect,
+                              nsEventStatus& aStatus)
 {
     aStatus = nsEventStatus_eIgnore;
     if (mWidgetListener &&
@@ -1638,46 +1383,6 @@ nsWindow::DispatchResizeEvent(nsIntRect &aRect, nsEventStatus &aStatus)
 }
 
 ///////////////////////////////////// OLD GECKO ECENTS need to Sort ///////////////////
-
-/* static */ bool
-isContextMenuKeyEvent(const QKeyEvent *qe)
-{
-    uint32_t kc = QtKeyCodeToDOMKeyCode(qe->key());
-    if (qe->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) {
-        return false;
-    }
-
-    bool isShift = qe->modifiers() & Qt::ShiftModifier;
-    return (kc == NS_VK_F10 && isShift) ||
-        (kc == NS_VK_CONTEXT_MENU && !isShift);
-}
-
-/* static */void
-InitKeyEvent(WidgetKeyboardEvent &aEvent, QKeyEvent *aQEvent)
-{
-    aEvent.InitBasicModifiers(aQEvent->modifiers() & Qt::ControlModifier,
-                              aQEvent->modifiers() & Qt::AltModifier,
-                              aQEvent->modifiers() & Qt::ShiftModifier,
-                              aQEvent->modifiers() & Qt::MetaModifier);
-    aEvent.mIsRepeat =
-        (aEvent.message == NS_KEY_DOWN || aEvent.message == NS_KEY_PRESS) &&
-        aQEvent->isAutoRepeat();
-    aEvent.time = 0;
-
-    if (sAltGrModifier) {
-        aEvent.modifiers |= (MODIFIER_CONTROL | MODIFIER_ALT);
-    }
-
-    // The transformations above and in qt for the keyval are not invertible
-    // so link to the QKeyEvent (which will vanish soon after return from the
-    // event callback) to give plugins access to hardware_keycode and state.
-    // (An XEvent would be nice but the QKeyEvent is good enough.)
-    aEvent.pluginEvent = (void *)aQEvent;
-}
-
-NS_IMPL_ISUPPORTS_INHERITED(nsWindow, nsBaseWidget, nsISupportsWeakReference)
-
-
 
 void
 nsWindow::ClearCachedResources()
@@ -1729,7 +1434,7 @@ nsWindow::PlaceBehind(nsTopLevelWidgetZPlacement  aPlacement,
 }
 
 NS_IMETHODIMP
-nsWindow::SetSizeMode(int32_t aMode)
+nsWindow::SetSizeMode(nsSizeMode aMode)
 {
     nsresult rv;
 
@@ -1797,14 +1502,13 @@ void find_first_visible_parent(QWindow* aItem, QWindow*& aVisibleItem)
 }
 
 NS_IMETHODIMP
-nsWindow::GetScreenBounds(nsIntRect &aRect)
+nsWindow::GetScreenBounds(LayoutDeviceIntRect& aRect)
 {
-    aRect = nsIntRect(nsIntPoint(0, 0), mBounds.Size());
+    aRect = LayoutDeviceIntRect(LayoutDeviceIntPoint(0, 0), mBounds.Size());
     if (mIsTopLevel) {
         QPoint pos = mWidget->position();
         aRect.MoveTo(pos.x(), pos.y());
-    }
-    else {
+    } else {
         aRect.MoveTo(WidgetToScreenOffset());
     }
     LOG(("GetScreenBounds %d %d | %d %d | %d %d\n",
@@ -1894,7 +1598,7 @@ nsWindow::CheckForRollup(double aMouseX, double aMouseY,
         // the current submenu
         uint32_t popupsToRollup = UINT32_MAX;
         if (rollupListener) {
-            nsAutoTArray<nsIWidget*, 5> widgetChain;
+            AutoTArray<nsIWidget*, 5> widgetChain;
             uint32_t sameTypeCount = rollupListener->GetSubmenuWidgetChain(&widgetChain);
             for (uint32_t i=0; i<widgetChain.Length(); ++i) {
                 nsIWidget* widget =  widgetChain[i];
@@ -1915,7 +1619,7 @@ nsWindow::CheckForRollup(double aMouseX, double aMouseY,
         // if we've determined that we should still rollup, do it.
         if (rollup) {
             nsIntPoint pos(aMouseX, aMouseY);
-            retVal = rollupListener->Rollup(popupsToRollup, &pos, nullptr);
+            retVal = rollupListener->Rollup(popupsToRollup, true, &pos, nullptr);
         }
     }
 
@@ -1967,7 +1671,7 @@ nsWindow::DispatchCommandEvent(nsIAtom* aCommand)
 }
 
 nsEventStatus
-nsWindow::DispatchContentCommandEvent(int32_t aMsg)
+nsWindow::DispatchContentCommandEvent(EventMessage aMsg)
 {
     WidgetContentCommandEvent event(true, aMsg, this);
 
@@ -2025,7 +1729,7 @@ nsWindow::SetWindowClass(const nsAString &xulWinType)
     }
     class_hint->res_class = ToNewCString(brandName);
     if (!class_hint->res_class) {
-        nsMemory::Free(class_hint->res_name);
+        free(class_hint->res_name);
         XFree(class_hint);
         return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -2053,8 +1757,8 @@ nsWindow::SetWindowClass(const nsAString &xulWinType)
                       class_hint);
     }
 
-    nsMemory::Free(class_hint->res_class);
-    nsMemory::Free(class_hint->res_name);
+    free(class_hint->res_class);
+    free(class_hint->res_name);
     XFree(class_hint);
 #endif
 
@@ -2264,8 +1968,7 @@ void
 nsWindow::ProcessMotionEvent()
 {
     if (mMoveEvent.needDispatch) {
-        WidgetMouseEvent event(true, NS_MOUSE_MOVE, this,
-                               WidgetMouseEvent::eReal);
+        WidgetMouseEvent event(true, eMouseMove, this, WidgetMouseEvent::eReal);
 
         event.refPoint.x = nscoord(mMoveEvent.pos.x());
         event.refPoint.y = nscoord(mMoveEvent.pos.y());

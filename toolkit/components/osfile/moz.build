@@ -29,4 +29,10 @@ EXTRA_PP_JS_MODULES += [
     'osfile.jsm',
 ]
 
-FINAL_LIBRARY = 'toolkitcomps'
+FINAL_LIBRARY = 'xul'
+
+with Files('**'):
+    BUG_COMPONENT = ('Toolkit', 'OS.File')
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wshadow']

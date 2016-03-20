@@ -7,6 +7,9 @@
 #ifndef jsapi_tests_tests_h
 #define jsapi_tests_tests_h
 
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/TypeTraits.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,84 +26,69 @@ class JSAPITestString {
     js::Vector<char, 0, js::SystemAllocPolicy> chars;
   public:
     JSAPITestString() {}
-    explicit JSAPITestString(const char *s) { *this += s; }
-    JSAPITestString(const JSAPITestString &s) { *this += s; }
+    explicit JSAPITestString(const char* s) { *this += s; }
+    JSAPITestString(const JSAPITestString& s) { *this += s; }
 
-    const char *begin() const { return chars.begin(); }
-    const char *end() const { return chars.end(); }
+    const char* begin() const { return chars.begin(); }
+    const char* end() const { return chars.end(); }
     size_t length() const { return chars.length(); }
 
-    JSAPITestString & operator +=(const char *s) {
+    JSAPITestString & operator +=(const char* s) {
         if (!chars.append(s, strlen(s)))
             abort();
         return *this;
     }
 
-    JSAPITestString & operator +=(const JSAPITestString &s) {
+    JSAPITestString & operator +=(const JSAPITestString& s) {
         if (!chars.append(s.begin(), s.length()))
             abort();
         return *this;
     }
 };
 
-inline JSAPITestString operator+(JSAPITestString a, const char *b) { return a += b; }
-inline JSAPITestString operator+(JSAPITestString a, const JSAPITestString &b) { return a += b; }
+inline JSAPITestString operator+(JSAPITestString a, const char* b) { return a += b; }
+inline JSAPITestString operator+(JSAPITestString a, const JSAPITestString& b) { return a += b; }
 
 class JSAPITest
 {
   public:
-    static JSAPITest *list;
-    JSAPITest *next;
+    static JSAPITest* list;
+    JSAPITest* next;
 
-    JSRuntime *rt;
-    JSContext *cx;
-    JS::Heap<JSObject *> global;
+    JSRuntime* rt;
+    JSContext* cx;
+    JS::PersistentRootedObject global;
     bool knownFail;
     JSAPITestString msgs;
-    JSCompartment *oldCompartment;
+    JSCompartment* oldCompartment;
 
-    JSAPITest() : rt(nullptr), cx(nullptr), global(nullptr),
-                  knownFail(false), oldCompartment(nullptr) {
+    JSAPITest() : rt(nullptr), cx(nullptr), knownFail(false), oldCompartment(nullptr) {
         next = list;
         list = this;
     }
 
-    virtual ~JSAPITest() { uninit(); }
+    virtual ~JSAPITest() {
+        MOZ_RELEASE_ASSERT(!rt);
+        MOZ_RELEASE_ASSERT(!cx);
+        MOZ_RELEASE_ASSERT(!global);
+    }
 
     virtual bool init();
-
-    virtual void uninit() {
-        if (oldCompartment) {
-            JS_LeaveCompartment(cx, oldCompartment);
-            oldCompartment = nullptr;
-        }
-        global = nullptr;
-        if (cx) {
-            JS::RemoveObjectRoot(cx, &global);
-            JS_LeaveCompartment(cx, nullptr);
-            JS_EndRequest(cx);
-            JS_DestroyContext(cx);
-            cx = nullptr;
-        }
-        if (rt) {
-            destroyRuntime();
-            rt = nullptr;
-        }
-    }
+    virtual void uninit();
 
     virtual const char * name() = 0;
     virtual bool run(JS::HandleObject global) = 0;
 
 #define EXEC(s) do { if (!exec(s, __FILE__, __LINE__)) return false; } while (false)
 
-    bool exec(const char *bytes, const char *filename, int lineno);
+    bool exec(const char* bytes, const char* filename, int lineno);
 
 #define EVAL(s, vp) do { if (!evaluate(s, __FILE__, __LINE__, vp)) return false; } while (false)
 
-    bool evaluate(const char *bytes, const char *filename, int lineno, JS::MutableHandleValue vp);
+    bool evaluate(const char* bytes, const char* filename, int lineno, JS::MutableHandleValue vp);
 
     JSAPITestString jsvalToSource(JS::HandleValue v) {
-        JSString *str = JS_ValueToSource(cx, v);
+        JSString* str = JS_ValueToSource(cx, v);
         if (str) {
             JSAutoByteString bytes(cx, str);
             if (!!bytes)
@@ -146,8 +134,8 @@ class JSAPITest
         return JSAPITestString(v ? "true" : "false");
     }
 
-    JSAPITestString toSource(JSAtom *v) {
-        JS::RootedValue val(cx, JS::StringValue((JSString *)v));
+    JSAPITestString toSource(JSAtom* v) {
+        JS::RootedValue val(cx, JS::StringValue((JSString*)v));
         return jsvalToSource(val);
     }
 
@@ -159,9 +147,14 @@ class JSAPITest
     // GCC 4.6), this template does not work when the second argument is
     // nullptr. It infers type U = long int. Use CHECK_NULL instead.
     template <typename T, typename U>
-    bool checkEqual(const T &actual, const U &expected,
-                    const char *actualExpr, const char *expectedExpr,
-                    const char *filename, int lineno) {
+    bool checkEqual(const T& actual, const U& expected,
+                    const char* actualExpr, const char* expectedExpr,
+                    const char* filename, int lineno)
+    {
+        static_assert(mozilla::IsSigned<T>::value == mozilla::IsSigned<U>::value,
+                      "using CHECK_EQUAL with different-signed inputs triggers compiler warnings");
+        static_assert(mozilla::IsUnsigned<T>::value == mozilla::IsUnsigned<U>::value,
+                      "using CHECK_EQUAL with different-signed inputs triggers compiler warnings");
         return (actual == expected) ||
             fail(JSAPITestString("CHECK_EQUAL failed: expected (") +
                  expectedExpr + ") = " + toSource(expected) +
@@ -175,8 +168,8 @@ class JSAPITest
     } while (false)
 
     template <typename T>
-    bool checkNull(const T *actual, const char *actualExpr,
-                   const char *filename, int lineno) {
+    bool checkNull(const T* actual, const char* actualExpr,
+                   const char* filename, int lineno) {
         return (actual == nullptr) ||
             fail(JSAPITestString("CHECK_NULL failed: expected nullptr, got (") +
                  actualExpr + ") = " + toSource(actual),
@@ -189,9 +182,9 @@ class JSAPITest
             return false; \
     } while (false)
 
-    bool checkSame(jsval actualArg, jsval expectedArg,
-                   const char *actualExpr, const char *expectedExpr,
-                   const char *filename, int lineno) {
+    bool checkSame(JS::Value actualArg, JS::Value expectedArg,
+                   const char* actualExpr, const char* expectedExpr,
+                   const char* filename, int lineno) {
         bool same;
         JS::RootedValue actual(cx, actualArg), expected(cx, expectedArg);
         return (JS_SameValue(cx, actual, expected, &same) && same) ||
@@ -212,13 +205,13 @@ class JSAPITest
             return fail(JSAPITestString("CHECK failed: " #expr), __FILE__, __LINE__); \
     } while (false)
 
-    bool fail(JSAPITestString msg = JSAPITestString(), const char *filename = "-", int lineno = 0) {
+    bool fail(JSAPITestString msg = JSAPITestString(), const char* filename = "-", int lineno = 0) {
         if (JS_IsExceptionPending(cx)) {
             js::gc::AutoSuppressGC gcoff(cx);
             JS::RootedValue v(cx);
             JS_GetPendingException(cx, &v);
             JS_ClearPendingException(cx);
-            JSString *s = JS::ToString(cx, v);
+            JSString* s = JS::ToString(cx, v);
             if (s) {
                 JSAutoByteString bytes(cx, s);
                 if (!!bytes)
@@ -235,8 +228,8 @@ class JSAPITest
     static const JSClass * basicGlobalClass() {
         static const JSClass c = {
             "global", JSCLASS_GLOBAL_FLAGS,
-            JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
-            JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr,
+            nullptr, nullptr, nullptr, nullptr,
+            nullptr, nullptr, nullptr, nullptr,
             nullptr, nullptr, nullptr,
             JS_GlobalObjectTraceHook
         };
@@ -245,15 +238,15 @@ class JSAPITest
 
   protected:
     static bool
-    print(JSContext *cx, unsigned argc, jsval *vp)
+    print(JSContext* cx, unsigned argc, JS::Value* vp)
     {
         JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
 
         for (unsigned i = 0; i < args.length(); i++) {
-            JSString *str = JS::ToString(cx, args[i]);
+            JSString* str = JS::ToString(cx, args[i]);
             if (!str)
                 return false;
-            char *bytes = JS_EncodeString(cx, str);
+            char* bytes = JS_EncodeString(cx, str);
             if (!bytes)
                 return false;
             printf("%s%s", i ? " " : "", bytes);
@@ -268,7 +261,7 @@ class JSAPITest
 
     bool definePrint();
 
-    static void setNativeStackQuota(JSRuntime *rt)
+    static void setNativeStackQuota(JSRuntime* rt)
     {
         const size_t MAX_STACK_SIZE =
 /* Assume we can't use more than 5e5 bytes of C stack by default. */
@@ -287,20 +280,22 @@ class JSAPITest
     }
 
     virtual JSRuntime * createRuntime() {
-        JSRuntime *rt = JS_NewRuntime(8L * 1024 * 1024);
+        JSRuntime* rt = JS_NewRuntime(8L * 1024 * 1024);
         if (!rt)
             return nullptr;
+        JS_SetErrorReporter(rt, &reportError);
         setNativeStackQuota(rt);
         return rt;
     }
 
     virtual void destroyRuntime() {
-        JS_ASSERT(!cx);
-        JS_ASSERT(rt);
+        MOZ_RELEASE_ASSERT(!cx);
+        MOZ_RELEASE_ASSERT(rt);
         JS_DestroyRuntime(rt);
+        rt = nullptr;
     }
 
-    static void reportError(JSContext *cx, const char *message, JSErrorReport *report) {
+    static void reportError(JSContext* cx, const char* message, JSErrorReport* report) {
         fprintf(stderr, "%s:%u:%s\n",
                 report->filename ? report->filename : "<no filename>",
                 (unsigned int) report->lineno,
@@ -308,26 +303,21 @@ class JSAPITest
     }
 
     virtual JSContext * createContext() {
-        JSContext *cx = JS_NewContext(rt, 8192);
-        if (!cx)
-            return nullptr;
-        JS::ContextOptionsRef(cx).setVarObjFix(true);
-        JS_SetErrorReporter(cx, &reportError);
-        return cx;
+        return JS_NewContext(rt, 8192);
     }
 
     virtual const JSClass * getGlobalClass() {
         return basicGlobalClass();
     }
 
-    virtual JSObject * createGlobal(JSPrincipals *principals = nullptr);
+    virtual JSObject * createGlobal(JSPrincipals* principals = nullptr);
 };
 
 #define BEGIN_TEST(testname)                                            \
     class cls_##testname : public JSAPITest {                           \
       public:                                                           \
-        virtual const char * name() { return #testname; }               \
-        virtual bool run(JS::HandleObject global)
+        virtual const char * name() override { return #testname; }      \
+        virtual bool run(JS::HandleObject global) override
 
 #define END_TEST(testname)                                              \
     };                                                                  \
@@ -344,8 +334,8 @@ class JSAPITest
 #define BEGIN_FIXTURE_TEST(fixture, testname)                           \
     class cls_##testname : public fixture {                             \
       public:                                                           \
-        virtual const char * name() { return #testname; }               \
-        virtual bool run(JS::HandleObject global)
+        virtual const char * name() override { return #testname; }      \
+        virtual bool run(JS::HandleObject global) override
 
 #define END_FIXTURE_TEST(fixture, testname)                             \
     };                                                                  \
@@ -359,8 +349,8 @@ class JSAPITest
  * without Administrator privileges.
  */
 class TempFile {
-    const char *name;
-    FILE *stream;
+    const char* name;
+    FILE* stream;
 
   public:
     TempFile() : name(), stream() { }
@@ -377,7 +367,7 @@ class TempFile {
      * closed and deleted via the member functions below, this object's
      * destructor will clean them up.
      */
-    FILE *open(const char *fileName)
+    FILE* open(const char* fileName)
     {
         stream = fopen(fileName, "wb+");
         if (!stream) {
@@ -419,6 +409,46 @@ class TestJSPrincipals : public JSPrincipals
     {
         refcount = rc;
     }
+
+    bool write(JSContext* cx, JSStructuredCloneWriter* writer) override {
+        MOZ_ASSERT(false, "not implemented");
+        return false;
+    }
 };
+
+#ifdef JS_GC_ZEAL
+/*
+ * Temporarily disable the GC zeal setting. This is only useful in tests that
+ * need very explicit GC behavior and should not be used elsewhere.
+ */
+class AutoLeaveZeal
+{
+    JSContext* cx_;
+    uint32_t zealBits_;
+    uint32_t frequency_;
+
+  public:
+    explicit AutoLeaveZeal(JSContext* cx) : cx_(cx) {
+        uint32_t dummy;
+        JS_GetGCZealBits(cx_, &zealBits_, &frequency_, &dummy);
+        JS_SetGCZeal(cx_, 0, 0);
+        JS::PrepareForFullGC(JS_GetRuntime(cx_));
+        JS::GCForReason(JS_GetRuntime(cx_), GC_SHRINK, JS::gcreason::DEBUG_GC);
+    }
+    ~AutoLeaveZeal() {
+        for (size_t i = 0; i < sizeof(zealBits_) * 8; i++) {
+            if (zealBits_ & (1 << i))
+                JS_SetGCZeal(cx_, i, frequency_);
+        }
+
+#ifdef DEBUG
+        uint32_t zealBitsAfter, frequencyAfter, dummy;
+        JS_GetGCZealBits(cx_, &zealBitsAfter, &frequencyAfter, &dummy);
+        MOZ_ASSERT(zealBitsAfter == zealBits_);
+        MOZ_ASSERT(frequencyAfter == frequency_);
+#endif
+    }
+};
+#endif /* JS_GC_ZEAL */
 
 #endif /* jsapi_tests_tests_h */

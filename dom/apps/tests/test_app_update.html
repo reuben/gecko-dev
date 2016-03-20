@@ -7,6 +7,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
   <meta charset="utf-8">
   <title>Test for Bug 826058</title>
   <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script type="application/javascript" src="common.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
   <script type="application/javascript;version=1.7">
 
@@ -17,14 +18,20 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
   var gBaseURL = 'http://test/tests/dom/apps/tests/';
   var gHostedManifestURL = gBaseURL + 'file_app.sjs?apptype=hosted&getmanifest=true';
   var gCachedManifestURL = gBaseURL + 'file_app.sjs?apptype=cached&getmanifest=true';
-  var gGenerator = runTest();
+  var gGenerator;
+  // We need to set the trusted hosted app csp pref since it's only in
+  // b2g.js for now.
+  function setCSPPrefs() {
+    SpecialPowers.pushPrefEnv({'set':[["dom.mozBrowserFramesEnabled",true]]},
+      function() {  gGenerator = runTest(); gGenerator.next(); });
+  }
 
   function go() {
     SpecialPowers.pushPermissions(
       [{ "type": "browser", "allow": 1, "context": document },
        { "type": "embed-apps", "allow": 1, "context": document },
        { "type": "webapps-manage", "allow": 1, "context": document }],
-      function() { gGenerator.next() });
+      setCSPPrefs);
   }
 
   function continueTest() {
@@ -54,10 +61,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
 
   function runTest() {
     // Set up.
-
-    SpecialPowers.setAllAppsLaunchable(true);
-    SpecialPowers.setBoolPref("dom.mozBrowserFramesEnabled", true);
-
     // Test Bug 927699 - navigator.mozApps.install(url) lets NS_ERROR_FAILURE
     //                   onto the web
     var request = navigator.mozApps.install("");
@@ -71,6 +74,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
     setAppVersion(1, continueTest);
     yield undefined;
     SpecialPowers.autoConfirmAppInstall(continueTest);
+    yield undefined;
+    SpecialPowers.autoConfirmAppUninstall(continueTest);
     yield undefined;
 
     // Load the app, uninstalled.
@@ -140,10 +145,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
     request.onsuccess = continueTest;
     yield undefined;
 
-    // Check the uninstalled app.
-    checkAppState(app, false, 3, continueTest);
-    yield undefined;
-
     // Install the cached app.
     setAppVersion(3, continueTest);
     yield undefined;
@@ -156,12 +157,12 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
     ok(app, "App is non-null");
     if (app.installState == "pending") {
       ok(true, "App is pending. Waiting for progress");
-      app.onprogress = function() ok(true, "Got download progress");
+      app.onprogress = () => ok(true, "Got download progress");
       app.ondownloadsuccess = continueTest;
       app.ondownloaderror = mozAppsError;
       yield undefined;
     }
-    is(app.installState, "installed", "App is installed");
+    is(app.installState, "installed", "Cached app is installed");
 
     // Check the cached app.
     checkAppState(app, true, 3, continueTest);
@@ -171,8 +172,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
     // manifest, so there should always be an update.
     var lastCheck = app.lastUpdateCheck;
     ok(true, "Setting callbacks");
-    app.ondownloadapplied = function() ok(true, "downloadapplied fired.");
-    app.ondownloadavailable = function() ok(false, "downloadavailable fired");
+    app.ondownloadapplied = () => ok(true, "downloadapplied fired.");
+    app.ondownloadavailable = () => ok(false, "downloadavailable fired");
     ok(true, "Checking for updates");
     var request = app.checkForUpdate();
     request.onerror = mozAppsError;
@@ -181,16 +182,12 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
     todo(app.lastUpdateCheck > lastCheck, "lastUpdateCheck updated appropriately");
 
 
-    // Uninstall the app.
+    // Uninstall the hosted app.
     request = navigator.mozApps.mgmt.uninstall(app);
     request.onerror = mozAppsError;
     request.onsuccess = continueTest;
     yield undefined;
-    ok(true, "Uninstalled app");
-
-    // Check the uninstalled app.
-    checkAppState(app, false, 3, continueTest);
-    yield undefined;
+    info("Uninstalled hosted appcache app");
   }
 
   function setAppVersion(version, cb) {
@@ -272,7 +269,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
   }
 
   function finish() {
-    SpecialPowers.clearUserPref("dom.mozBrowserFramesEnabled");
     SimpleTest.finish();
   }
 
@@ -282,7 +278,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=826058
 
   </script>
 </head>
-<body onload="go()">
+<body onload="prepareEnv(go)">
 <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=826058">Mozilla Bug 826058</a>
 <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=863337">Mozilla Bug 863337</a>
 <p id="display"></p>

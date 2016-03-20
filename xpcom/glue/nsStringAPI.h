@@ -1,4 +1,5 @@
-/* vim:set ts=2 sw=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -20,7 +21,7 @@
 
 #include "nsXPCOMStrings.h"
 #include "nsISupportsImpl.h"
-#include "prlog.h"
+#include "mozilla/Logging.h"
 #include "nsTArray.h"
 
 /**
@@ -1106,7 +1107,7 @@ public:
   }
 
 private:
-  self_type& operator=(const self_type& aString) MOZ_DELETE;
+  self_type& operator=(const self_type& aString) = delete;
 };
 
 class nsDependentCString : public nsCString
@@ -1130,7 +1131,7 @@ public:
   }
 
 private:
-  self_type& operator=(const self_type& aString) MOZ_DELETE;
+  self_type& operator=(const self_type& aString) = delete;
 };
 
 
@@ -1162,7 +1163,7 @@ CopyASCIItoUTF16(const nsACString& aSource, nsAString& aDest)
   NS_CStringToUTF16(aSource, NS_CSTRING_ENCODING_ASCII, aDest);
 }
 
-NS_COM_GLUE char*
+char*
 ToNewUTF8String(const nsAString& aSource);
 
 class NS_ConvertASCIItoUTF16 : public nsString
@@ -1183,7 +1184,7 @@ public:
   }
 
 private:
-  self_type& operator=(const self_type& aString) MOZ_DELETE;
+  self_type& operator=(const self_type& aString) = delete;
 };
 
 class NS_ConvertUTF8toUTF16 : public nsString
@@ -1204,7 +1205,7 @@ public:
   }
 
 private:
-  self_type& operator=(const self_type& aString) MOZ_DELETE;
+  self_type& operator=(const self_type& aString) = delete;
 };
 
 class NS_ConvertUTF16toUTF8 : public nsCString
@@ -1217,7 +1218,7 @@ public:
     NS_UTF16ToCString(aStr, NS_CSTRING_ENCODING_UTF8, *this);
   }
 
-  explicit NS_ConvertUTF16toUTF8(const char16_t* aData,
+  explicit NS_ConvertUTF16toUTF8(const char16ptr_t aData,
                                  uint32_t aLength = UINT32_MAX)
   {
     NS_UTF16ToCString(nsDependentString(aData, aLength),
@@ -1225,7 +1226,7 @@ public:
   }
 
 private:
-  self_type& operator=(const self_type& aString) MOZ_DELETE;
+  self_type& operator=(const self_type& aString) = delete;
 };
 
 class NS_LossyConvertUTF16toASCII : public nsCString
@@ -1238,7 +1239,7 @@ public:
     NS_UTF16ToCString(aStr, NS_CSTRING_ENCODING_ASCII, *this);
   }
 
-  explicit NS_LossyConvertUTF16toASCII(const char16_t* aData,
+  explicit NS_LossyConvertUTF16toASCII(const char16ptr_t aData,
                                        uint32_t aLength = UINT32_MAX)
   {
     NS_UTF16ToCString(nsDependentString(aData, aLength),
@@ -1246,7 +1247,7 @@ public:
   }
 
 private:
-  self_type& operator=(const self_type& aString) MOZ_DELETE;
+  self_type& operator=(const self_type& aString) = delete;
 };
 
 
@@ -1306,7 +1307,7 @@ class nsGetterCopies
 public:
   typedef char16_t char_type;
 
-  nsGetterCopies(nsString& aStr)
+  explicit nsGetterCopies(nsString& aStr)
     : mString(aStr)
     , mData(nullptr)
   {
@@ -1332,7 +1333,7 @@ class nsCGetterCopies
 public:
   typedef char char_type;
 
-  nsCGetterCopies(nsCString& aStr)
+  explicit nsCGetterCopies(nsCString& aStr)
     : mString(aStr)
     , mData(nullptr)
   {
@@ -1358,7 +1359,7 @@ getter_Copies(nsCString& aString)
 * substrings
 */
 
-class NS_COM_GLUE nsDependentSubstring : public nsStringContainer
+class nsDependentSubstring : public nsStringContainer
 {
 public:
   typedef nsDependentSubstring self_type;
@@ -1388,10 +1389,10 @@ public:
   }
 
 private:
-  self_type& operator=(const self_type& aString) MOZ_DELETE;
+  self_type& operator=(const self_type& aString) = delete;
 };
 
-class NS_COM_GLUE nsDependentCSubstring : public nsCStringContainer
+class nsDependentCSubstring : public nsCStringContainer
 {
 public:
   typedef nsDependentCSubstring self_type;
@@ -1421,7 +1422,7 @@ public:
   }
 
 private:
-  self_type& operator=(const self_type& aString) MOZ_DELETE;
+  self_type& operator=(const self_type& aString) = delete;
 };
 
 
@@ -1445,8 +1446,8 @@ Substring(const nsAString& aStr, uint32_t aStartPos, uint32_t aLength)
 inline const nsDependentSubstring
 Substring(const char16_t* aStart, const char16_t* aEnd)
 {
-  NS_ABORT_IF_FALSE(uint32_t(aEnd - aStart) == uintptr_t(aEnd - aStart),
-                    "string too long");
+  MOZ_ASSERT(uint32_t(aEnd - aStart) == uintptr_t(aEnd - aStart),
+             "string too long");
   return nsDependentSubstring(aStart, uint32_t(aEnd - aStart));
 }
 
@@ -1484,8 +1485,8 @@ Substring(const nsACString& aStr, uint32_t aStartPos, uint32_t aLength)
 inline const nsDependentCSubstring
 Substring(const char* aStart, const char* aEnd)
 {
-  NS_ABORT_IF_FALSE(uint32_t(aEnd - aStart) == uintptr_t(aEnd - aStart),
-                    "string too long");
+  MOZ_ASSERT(uint32_t(aEnd - aStart) == uintptr_t(aEnd - aStart),
+             "string too long");
   return nsDependentCSubstring(aStart, uint32_t(aEnd - aStart));
 }
 

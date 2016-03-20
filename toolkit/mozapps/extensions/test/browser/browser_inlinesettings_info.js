@@ -69,7 +69,6 @@ function installAddon(aCallback) {
 function checkScrolling(aShouldHaveScrolled) {
   var detailView = gManagerWindow.document.getElementById("detail-view");
   var boxObject = detailView.boxObject;
-  boxObject.QueryInterface(Ci.nsIScrollBoxObject);
   ok(detailView.scrollHeight > boxObject.height, "Page should require scrolling");
   if (aShouldHaveScrolled)
     isnot(detailView.scrollTop, 0, "Page should have scrolled");
@@ -215,7 +214,7 @@ add_test(function() {
 
     ok(!settings[1].hasAttribute("first-row"), "Not the first row");
     Services.prefs.setIntPref("extensions.inlinesettings1.boolint", 0);
-    var input = gManagerWindow.document.getAnonymousElementByAttribute(settings[1], "anonid", "input");
+    input = gManagerWindow.document.getAnonymousElementByAttribute(settings[1], "anonid", "input");
     isnot(input.checked, true, "Checkbox should have initial value");
     EventUtils.synthesizeMouseAtCenter(input, { clickCount: 1 }, gManagerWindow);
     is(input.checked, true, "Checkbox should have updated value");
@@ -226,7 +225,7 @@ add_test(function() {
 
     ok(!settings[2].hasAttribute("first-row"), "Not the first row");
     Services.prefs.setIntPref("extensions.inlinesettings1.integer", 0);
-    var input = gManagerWindow.document.getAnonymousElementByAttribute(settings[2], "anonid", "input");
+    input = gManagerWindow.document.getAnonymousElementByAttribute(settings[2], "anonid", "input");
     is(input.value, "0", "Number box should have initial value");
     input.select();
     EventUtils.synthesizeKey("1", {}, gManagerWindow);
@@ -239,7 +238,7 @@ add_test(function() {
 
     ok(!settings[3].hasAttribute("first-row"), "Not the first row");
     Services.prefs.setCharPref("extensions.inlinesettings1.string", "foo");
-    var input = gManagerWindow.document.getAnonymousElementByAttribute(settings[3], "anonid", "input");
+    input = gManagerWindow.document.getAnonymousElementByAttribute(settings[3], "anonid", "input");
     is(input.value, "foo", "Text box should have initial value");
     input.select();
     EventUtils.synthesizeKey("b", {}, gManagerWindow);
@@ -249,7 +248,7 @@ add_test(function() {
     is(Services.prefs.getCharPref("extensions.inlinesettings1.string"), "bar", "String pref should have been updated");
 
     ok(!settings[4].hasAttribute("first-row"), "Not the first row");
-    var input = settings[4].firstElementChild;
+    input = settings[4].firstElementChild;
     is(input.value, "1", "Menulist should have initial value");
     input.focus();
     EventUtils.synthesizeKey("b", {}, gManagerWindow);
@@ -272,6 +271,10 @@ add_test(function() {
     try {
       ok(!settings[6].hasAttribute("first-row"), "Not the first row");
       var button = gManagerWindow.document.getAnonymousElementByAttribute(settings[6], "anonid", "button");
+
+      // Workaround for bug 1155324 - we need to ensure that the button is scrolled into view.
+      button.scrollIntoView();
+
       input = gManagerWindow.document.getAnonymousElementByAttribute(settings[6], "anonid", "input");
       is(input.value, "", "Label value should be empty");
       is(input.tooltipText, "", "Label tooltip should be empty");
@@ -355,7 +358,7 @@ add_test(function() {
 
     ok(!settings[1].hasAttribute("first-row"), "Not the first row");
     Services.prefs.setIntPref("extensions.inlinesettings3.radioInt", 5);
-    var radios = settings[1].getElementsByTagName("radio");
+    radios = settings[1].getElementsByTagName("radio");
     isnot(radios[0].selected, true, "Correct radio button should be selected");
     is(radios[1].selected, true, "Correct radio button should be selected");
     isnot(radios[2].selected, true, "Correct radio button should be selected");
@@ -366,7 +369,7 @@ add_test(function() {
 
     ok(!settings[2].hasAttribute("first-row"), "Not the first row");
     Services.prefs.setCharPref("extensions.inlinesettings3.radioString", "juliet");
-    var radios = settings[2].getElementsByTagName("radio");
+    radios = settings[2].getElementsByTagName("radio");
     isnot(radios[0].selected, true, "Correct radio button should be selected");
     is(radios[1].selected, true, "Correct radio button should be selected");
     isnot(radios[2].selected, true, "Correct radio button should be selected");
@@ -437,7 +440,7 @@ add_test(function() {
     is_element_hidden(node, "Unsupported settings should not be visible");
     ok(!node.hasAttribute("first-row"), "Hidden row is not the first row");
 
-    var button = gManagerWindow.document.getElementById("detail-prefs-btn");
+    button = gManagerWindow.document.getElementById("detail-prefs-btn");
     is_element_hidden(button, "Preferences button should not be visible");
 
     gCategoryUtilities.openType("extension", run_next_test);

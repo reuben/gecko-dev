@@ -34,14 +34,17 @@ public:
 
   // Accessible
   virtual Accessible* ChildAtPoint(int32_t aX, int32_t aY,
-                                   EWhichChildAtPoint aWhichChild);
-  virtual bool InsertChildAt(uint32_t aIndex, Accessible* aChild) MOZ_OVERRIDE MOZ_FINAL;
-  virtual bool RemoveChild(Accessible* aChild) MOZ_OVERRIDE MOZ_FINAL;
+                                   EWhichChildAtPoint aWhichChild) override;
+  virtual bool InsertChildAt(uint32_t aIndex, Accessible* aChild) override final;
+  virtual bool RemoveChild(Accessible* aChild) override final;
+
+  virtual bool IsAcceptableChild(nsIContent* aEl) const override;
 
 protected:
+  virtual ~LeafAccessible() {}
 
   // Accessible
-  virtual void CacheChildren();
+  virtual void CacheChildren() override;
 };
 
 /**
@@ -55,57 +58,54 @@ class LinkableAccessible : public AccessibleWrap
 public:
   enum { eAction_Jump = 0 };
 
-  LinkableAccessible(nsIContent* aContent, DocAccessible* aDoc);
+  LinkableAccessible(nsIContent* aContent, DocAccessible* aDoc) :
+    AccessibleWrap(aContent, aDoc)
+  {
+  }
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  // nsIAccessible
-  NS_IMETHOD GetActionName(uint8_t aIndex, nsAString& aName);
-  NS_IMETHOD DoAction(uint8_t index);
-  NS_IMETHOD TakeFocus();
-
   // Accessible
-  virtual void Shutdown();
-  virtual void Value(nsString& aValue);
-  virtual uint64_t NativeLinkState() const;
+  virtual void Value(nsString& aValue) override;
+  virtual uint64_t NativeLinkState() const override;
+  virtual void TakeFocus() override;
 
   // ActionAccessible
-  virtual uint8_t ActionCount();
-  virtual KeyBinding AccessKey() const;
+  virtual uint8_t ActionCount() override;
+  virtual void ActionNameAt(uint8_t aIndex, nsAString& aName) override;
+  virtual bool DoAction(uint8_t index) override;
+  virtual KeyBinding AccessKey() const override;
 
+  // ActionAccessible helpers
+  Accessible* ActionWalk(bool* aIsLink = nullptr,
+                         bool* aIsOnclick = nullptr,
+                         bool* aIsLabelWithControl = nullptr);
   // HyperLinkAccessible
-  virtual already_AddRefed<nsIURI> AnchorURIAt(uint32_t aAnchorIndex);
+  virtual already_AddRefed<nsIURI> AnchorURIAt(uint32_t aAnchorIndex) override;
 
 protected:
-  // Accessible
-  virtual void BindToParent(Accessible* aParent, uint32_t aIndexInParent);
-  virtual void UnbindFromParent();
+  virtual ~LinkableAccessible() {}
 
-  /**
-   * Parent accessible that provides an action for this linkable accessible.
-   */
-  Accessible* mActionAcc;
-  bool mIsLink;
-  bool mIsOnclick;
 };
 
 /**
- * A simple accessible that gets its enumerated role passed into constructor.
+ * A simple accessible that gets its enumerated role.
  */
+template<a11y::role R>
 class EnumRoleAccessible : public AccessibleWrap
 {
 public:
-  EnumRoleAccessible(nsIContent* aContent, DocAccessible* aDoc, 
-                     a11y::role aRole);
-  virtual ~EnumRoleAccessible() { }
+  EnumRoleAccessible(nsIContent* aContent, DocAccessible* aDoc) :
+    AccessibleWrap(aContent, aDoc) { }
 
-  NS_DECL_ISUPPORTS_INHERITED
+  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aPtr) override
+    { return Accessible::QueryInterface(aIID, aPtr); }
 
   // Accessible
-  virtual a11y::role NativeRole();
+  virtual a11y::role NativeRole() override { return R; }
 
 protected:
-  a11y::role mRole;
+  virtual ~EnumRoleAccessible() { }
 };
 
 
@@ -116,14 +116,17 @@ protected:
 class DummyAccessible : public AccessibleWrap
 {
 public:
-  DummyAccessible() : AccessibleWrap(nullptr, nullptr) { }
-  virtual ~DummyAccessible() { }
+  explicit DummyAccessible(DocAccessible* aDocument = nullptr) :
+    AccessibleWrap(nullptr, aDocument) { }
 
-  virtual uint64_t NativeState() MOZ_OVERRIDE MOZ_FINAL;
-  virtual uint64_t NativeInteractiveState() const MOZ_OVERRIDE MOZ_FINAL;
-  virtual uint64_t NativeLinkState() const MOZ_OVERRIDE MOZ_FINAL;
-  virtual bool NativelyUnavailable() const MOZ_OVERRIDE MOZ_FINAL;
-  virtual void ApplyARIAState(uint64_t* aState) const MOZ_OVERRIDE MOZ_FINAL;
+  virtual uint64_t NativeState() override final;
+  virtual uint64_t NativeInteractiveState() const override final;
+  virtual uint64_t NativeLinkState() const override final;
+  virtual bool NativelyUnavailable() const override final;
+  virtual void ApplyARIAState(uint64_t* aState) const override final;
+
+protected:
+  virtual ~DummyAccessible() { }
 };
 
 } // namespace a11y

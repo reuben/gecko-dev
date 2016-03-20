@@ -92,6 +92,7 @@ SECU_GetPasswordString(void *arg, char *prompt)
     output = fopen(consoleName, "w");
     if (output == NULL) {
 	fprintf(stderr, "Error opening output terminal for write\n");
+	fclose(input);
 	return NULL;
     }
 
@@ -290,6 +291,9 @@ secu_InitSlotPassword(PK11SlotInfo *slot, PRBool retry, void *arg)
     output = fopen(consoleName, "w");
     if (output == NULL) {
 	PR_fprintf(PR_STDERR, "Error opening output terminal for write\n");
+#ifndef _WINDOWS
+	fclose(input);
+#endif
 	return NULL;
     }
 
@@ -371,7 +375,8 @@ SECU_ChangePW2(PK11SlotInfo *slot, char *oldPass, char *newPass,
 		PR_fprintf(PR_STDERR, "Invalid password.\n");
 		PORT_Memset(oldpw, 0, PL_strlen(oldpw));
 		PORT_Free(oldpw);
-		return SECFailure;
+		rv = SECFailure;
+                goto done;
 	    }
 	} else
 	    break;
@@ -381,20 +386,22 @@ SECU_ChangePW2(PK11SlotInfo *slot, char *oldPass, char *newPass,
 
     newpw = secu_InitSlotPassword(slot, PR_FALSE, &newpwdata);
 
-    if (PK11_ChangePW(slot, oldpw, newpw) != SECSuccess) {
+    rv = PK11_ChangePW(slot, oldpw, newpw);
+    if (rv != SECSuccess) {
 	PR_fprintf(PR_STDERR, "Failed to change password.\n");
-	return SECFailure;
+    } else {
+        PR_fprintf(PR_STDOUT, "Password changed successfully.\n");
     }
 
     PORT_Memset(oldpw, 0, PL_strlen(oldpw));
     PORT_Free(oldpw);
 
-    PR_fprintf(PR_STDOUT, "Password changed successfully.\n");
-
 done:
-    PORT_Memset(newpw, 0, PL_strlen(newpw));
-    PORT_Free(newpw);
-    return SECSuccess;
+    if (newpw) {
+        PORT_Memset(newpw, 0, PL_strlen(newpw));
+        PORT_Free(newpw);
+    }
+    return rv;
 }
 
 struct matchobj {
@@ -409,10 +416,13 @@ SECU_DefaultSSLDir(void)
     char *dir;
     static char sslDir[1000];
 
-    dir = PR_GetEnv("SSL_DIR");
+    dir = PR_GetEnvSecure("SSL_DIR");
     if (!dir)
 	return NULL;
 
+    if (strlen(dir) >= PR_ARRAY_SIZE(sslDir)) {
+	return NULL;
+    }
     sprintf(sslDir, "%s", dir);
 
     if (sslDir[strlen(sslDir)-1] == '/')
@@ -445,7 +455,7 @@ SECU_ConfigDirectory(const char* base)
     
 
     if (base == NULL || *base == 0) {
-	home = PR_GetEnv("HOME");
+	home = PR_GetEnvSecure("HOME");
 	if (!home) home = "";
 
 	if (*home && home[strlen(home) - 1] == '/')
@@ -1546,7 +1556,7 @@ SECU_PrintDumpDerIssuerAndSerial(FILE *out, SECItem *der, char *m,
     fprintf(out, "Serial DER as C source: \n{ %d, \"", c->serialNumber.len);
 
     {
-      int i;
+      unsigned int i;
       for (i=0; i < c->serialNumber.len; ++i) {
         unsigned char *chardata = (unsigned char*)(c->serialNumber.data);
         unsigned char c = *(chardata + i);
@@ -2408,6 +2418,45 @@ loser:
 }
 
 int
+SECU_PrintCertificateBasicInfo(FILE *out, const SECItem *der, const char *m, int level)
+{
+    PLArenaPool *arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
+    CERTCertificate *c;
+    int rv = SEC_ERROR_NO_MEMORY;
+    
+    if (!arena)
+	return rv;
+
+    /* Decode certificate */
+    c = PORT_ArenaZNew(arena, CERTCertificate);
+    if (!c)
+	goto loser;
+    c->arena = arena;
+    rv = SEC_ASN1DecodeItem(arena, c, 
+                            SEC_ASN1_GET(CERT_CertificateTemplate), der);
+    if (rv) {
+        SECU_Indent(out, level); 
+	SECU_PrintErrMsg(out, level, "Error", "Parsing extension");
+	SECU_PrintAny(out, der, "Raw", level);
+	goto loser;
+    }
+    /* Pretty print it out */
+    SECU_Indent(out, level); fprintf(out, "%s:\n", m);
+    SECU_PrintInteger(out, &c->serialNumber, "Serial Number", level+1);
+    SECU_PrintAlgorithmID(out, &c->signature, "Signature Algorithm", level+1);
+    SECU_PrintName(out, &c->issuer, "Issuer", level+1);
+    if (!SECU_GetWrapEnabled()) /*SECU_PrintName didn't add newline*/
+	SECU_Newline(out);
+    secu_PrintValidity(out, &c->validity, "Validity", level+1);
+    SECU_PrintName(out, &c->subject, "Subject", level+1);
+    if (!SECU_GetWrapEnabled()) /*SECU_PrintName didn't add newline*/
+	SECU_Newline(out);
+loser:
+    PORT_FreeArena(arena, PR_FALSE);
+    return rv;
+}
+
+int
 SECU_PrintSubjectPublicKeyInfo(FILE *out, SECItem *der, char *m, int level)
 {
     PLArenaPool *arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
@@ -2699,7 +2748,7 @@ secu_PrintPKCS7Signed(FILE *out, SEC_PKCS7SignedData *src,
 	while ((aCert = src->rawCerts[iv++]) != NULL) {
 	    sprintf(om, "Certificate (%x)", iv);
 	    rv = SECU_PrintSignedData(out, aCert, om, level + 2, 
-				      SECU_PrintCertificate);
+				      (SECU_PPFunc)SECU_PrintCertificate);
 	    if (rv)
 		return rv;
 	}
@@ -2818,7 +2867,7 @@ secu_PrintPKCS7SignedAndEnveloped(FILE *out,
 	while ((aCert = src->rawCerts[iv++]) != NULL) {
 	    sprintf(om, "Certificate (%x)", iv);
 	    rv = SECU_PrintSignedData(out, aCert, om, level + 2, 
-				      SECU_PrintCertificate);
+				      (SECU_PPFunc)SECU_PrintCertificate);
 	    if (rv)
 		return rv;
 	}
@@ -3148,7 +3197,7 @@ SEC_PrintCertificateAndTrust(CERTCertificate *cert,
     data.len = cert->derCert.len;
 
     rv = SECU_PrintSignedData(stdout, &data, label, 0,
-			      SECU_PrintCertificate);
+			      (SECU_PPFunc)SECU_PrintCertificate);
     if (rv) {
 	return(SECFailure);
     }
@@ -3239,7 +3288,7 @@ SECU_displayVerifyLog(FILE *outfile, CERTVerifyLog *log,
 	    errstr = NULL;
 	    switch (node->error) {
 	    case SEC_ERROR_INADEQUATE_KEY_USAGE:
-		flags = (unsigned int)node->arg;
+		flags = (unsigned int)((char *)node->arg - (char *)NULL);
 		switch (flags) {
 		case KU_DIGITAL_SIGNATURE:
 		    errstr = "Cert cannot sign.";
@@ -3254,8 +3303,9 @@ SECU_displayVerifyLog(FILE *outfile, CERTVerifyLog *log,
 		    errstr = "[unknown usage].";
 		    break;
 		}
+		break;
 	    case SEC_ERROR_INADEQUATE_CERT_TYPE:
-		flags = (unsigned int)node->arg;
+		flags = (unsigned int)((char *)node->arg - (char *)NULL);
 		switch (flags) {
 		case NS_CERT_TYPE_SSL_CLIENT:
 		case NS_CERT_TYPE_SSL_SERVER:
@@ -3280,6 +3330,7 @@ SECU_displayVerifyLog(FILE *outfile, CERTVerifyLog *log,
 		    errstr = "[unknown usage].";
 		    break;
 		}
+		break;
 	    case SEC_ERROR_UNKNOWN_ISSUER:
 	    case SEC_ERROR_UNTRUSTED_ISSUER:
 	    case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
@@ -3666,6 +3717,12 @@ SECU_GetSSLVersionFromName(const char *buf, size_t bufLen, PRUint16 *version)
         *version = SSL_LIBRARY_VERSION_TLS_1_2;
         return SECSuccess;
     }
+
+    if (!PL_strncasecmp(buf, "tls1.3", bufLen)) {
+        *version = SSL_LIBRARY_VERSION_TLS_1_3;
+        return SECSuccess;
+    }
+
     PORT_SetError(SEC_ERROR_INVALID_ARGS);
     return SECFailure;
 }

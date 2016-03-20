@@ -1,4 +1,5 @@
-/* -*- Mode: C++ tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -37,12 +38,111 @@ TelephonyParent::RecvPTelephonyRequestConstructor(PTelephonyRequestParent* aActo
                                                   const IPCTelephonyRequest& aRequest)
 {
   TelephonyRequestParent* actor = static_cast<TelephonyRequestParent*>(aActor);
+  nsCOMPtr<nsITelephonyService> service = do_GetService(TELEPHONY_SERVICE_CONTRACTID);
+
+  if (!service) {
+    return NS_SUCCEEDED(actor->GetCallback()->NotifyError(NS_LITERAL_STRING("InvalidStateError")));
+  }
 
   switch (aRequest.type()) {
-    case IPCTelephonyRequest::TEnumerateCallsRequest:
-      return actor->DoRequest(aRequest.get_EnumerateCallsRequest());
-    case IPCTelephonyRequest::TDialRequest:
-      return actor->DoRequest(aRequest.get_DialRequest());
+    case IPCTelephonyRequest::TEnumerateCallsRequest: {
+      nsresult rv = service->EnumerateCalls(actor);
+      if (NS_FAILED(rv)) {
+        return NS_SUCCEEDED(EnumerateCallStateComplete());
+      } else {
+        return true;
+      }
+    }
+
+    case IPCTelephonyRequest::TDialRequest: {
+      const DialRequest& request = aRequest.get_DialRequest();
+      service->Dial(request.clientId(), request.number(),
+                    request.isEmergency(), actor->GetDialCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::TSendUSSDRequest: {
+      const SendUSSDRequest& request = aRequest.get_SendUSSDRequest();
+      service->SendUSSD(request.clientId(), request.ussd(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::TCancelUSSDRequest: {
+      const CancelUSSDRequest& request = aRequest.get_CancelUSSDRequest();
+      service->CancelUSSD(request.clientId(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::TConferenceCallRequest: {
+      const ConferenceCallRequest& request = aRequest.get_ConferenceCallRequest();
+      service->ConferenceCall(request.clientId(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::TSeparateCallRequest: {
+      const SeparateCallRequest& request = aRequest.get_SeparateCallRequest();
+      service->SeparateCall(request.clientId(), request.callIndex(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::THangUpConferenceRequest: {
+      const HangUpConferenceRequest& request = aRequest.get_HangUpConferenceRequest();
+      service->HangUpConference(request.clientId(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::THoldConferenceRequest: {
+      const HoldConferenceRequest& request = aRequest.get_HoldConferenceRequest();
+      service->HoldConference(request.clientId(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::TResumeConferenceRequest: {
+      const ResumeConferenceRequest& request = aRequest.get_ResumeConferenceRequest();
+      service->ResumeConference(request.clientId(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::TAnswerCallRequest: {
+      const AnswerCallRequest& request = aRequest.get_AnswerCallRequest();
+      service->AnswerCall(request.clientId(), request.callIndex(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::THangUpCallRequest: {
+      const HangUpCallRequest& request = aRequest.get_HangUpCallRequest();
+      service->HangUpCall(request.clientId(), request.callIndex(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::TRejectCallRequest: {
+      const RejectCallRequest& request = aRequest.get_RejectCallRequest();
+      service->RejectCall(request.clientId(), request.callIndex(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::THoldCallRequest: {
+      const HoldCallRequest& request = aRequest.get_HoldCallRequest();
+      service->HoldCall(request.clientId(), request.callIndex(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::TResumeCallRequest: {
+      const ResumeCallRequest& request = aRequest.get_ResumeCallRequest();
+      service->ResumeCall(request.clientId(), request.callIndex(), actor->GetCallback());
+      return true;
+    }
+
+    case IPCTelephonyRequest::TSendTonesRequest: {
+      const SendTonesRequest& request = aRequest.get_SendTonesRequest();
+      service->SendTones(request.clientId(),
+                         request.dtmfChars(),
+                         request.pauseDuration(),
+                         request.toneDuration(),
+                         actor->GetCallback());
+      return true;
+    }
+
     default:
       MOZ_CRASH("Unknown type!");
   }
@@ -98,111 +198,6 @@ TelephonyParent::RecvUnregisterListener()
   NS_ENSURE_TRUE(service, true);
 
   mRegistered = !NS_SUCCEEDED(service->UnregisterListener(this));
-  return true;
-}
-
-bool
-TelephonyParent::RecvHangUpCall(const uint32_t& aClientId,
-                                const uint32_t& aCallIndex)
-{
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(service, true);
-
-  service->HangUp(aClientId, aCallIndex);
-  return true;
-}
-
-bool
-TelephonyParent::RecvAnswerCall(const uint32_t& aClientId,
-                                const uint32_t& aCallIndex)
-{
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(service, true);
-
-  service->AnswerCall(aClientId, aCallIndex);
-  return true;
-}
-
-bool
-TelephonyParent::RecvRejectCall(const uint32_t& aClientId,
-                                const uint32_t& aCallIndex)
-{
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(service, true);
-
-  service->RejectCall(aClientId, aCallIndex);
-  return true;
-}
-
-bool
-TelephonyParent::RecvHoldCall(const uint32_t& aClientId,
-                              const uint32_t& aCallIndex)
-{
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(service, true);
-
-  service->HoldCall(aClientId, aCallIndex);
-  return true;
-}
-
-bool
-TelephonyParent::RecvResumeCall(const uint32_t& aClientId,
-                                const uint32_t& aCallIndex)
-{
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(service, true);
-
-  service->ResumeCall(aClientId, aCallIndex);
-  return true;
-}
-
-bool
-TelephonyParent::RecvConferenceCall(const uint32_t& aClientId)
-{
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(service, true);
-
-  service->ConferenceCall(aClientId);
-  return true;
-}
-
-bool
-TelephonyParent::RecvSeparateCall(const uint32_t& aClientId,
-                                  const uint32_t& aCallIndex)
-{
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(service, true);
-
-  service->SeparateCall(aClientId, aCallIndex);
-  return true;
-}
-
-bool
-TelephonyParent::RecvHoldConference(const uint32_t& aClientId)
-{
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(service, true);
-
-  service->HoldConference(aClientId);
-  return true;
-}
-
-bool
-TelephonyParent::RecvResumeConference(const uint32_t& aClientId)
-{
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(service, true);
-
-  service->ResumeConference(aClientId);
   return true;
 }
 
@@ -279,35 +274,16 @@ TelephonyParent::RecvSetSpeakerEnabled(const bool& aEnabled)
 // nsITelephonyListener
 
 NS_IMETHODIMP
-TelephonyParent::CallStateChanged(uint32_t aClientId,
-                                  uint32_t aCallIndex,
-                                  uint16_t aCallState,
-                                  const nsAString& aNumber,
-                                  uint16_t aNumberPresentation,
-                                  const nsAString& aName,
-                                  uint16_t aNamePresentation,
-                                  bool aIsOutgoing,
-                                  bool aIsEmergency,
-                                  bool aIsConference,
-                                  bool aIsSwitchable,
-                                  bool aIsMergeable)
+TelephonyParent::CallStateChanged(uint32_t aLength, nsITelephonyCallInfo** aAllInfo)
 {
   NS_ENSURE_TRUE(!mActorDestroyed, NS_ERROR_FAILURE);
 
-  IPCCallStateData data(aCallIndex, aCallState, nsString(aNumber),
-                        aNumberPresentation, nsString(aName), aNamePresentation,
-                        aIsOutgoing, aIsEmergency, aIsConference,
-                        aIsSwitchable, aIsMergeable);
-  return SendNotifyCallStateChanged(aClientId, data) ? NS_OK : NS_ERROR_FAILURE;
-}
+  nsTArray<nsITelephonyCallInfo*> allInfo;
+  for (uint32_t i = 0; i < aLength; i++) {
+    allInfo.AppendElement(aAllInfo[i]);
+  }
 
-NS_IMETHODIMP
-TelephonyParent::ConferenceCallStateChanged(uint16_t aCallState)
-{
-  NS_ENSURE_TRUE(!mActorDestroyed, NS_ERROR_FAILURE);
-
-  return SendNotifyConferenceCallStateChanged(aCallState) ? NS_OK
-                                                          : NS_ERROR_FAILURE;
+  return SendNotifyCallStateChanged(allInfo) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -317,18 +293,7 @@ TelephonyParent::EnumerateCallStateComplete()
 }
 
 NS_IMETHODIMP
-TelephonyParent::EnumerateCallState(uint32_t aClientId,
-                                    uint32_t aCallIndex,
-                                    uint16_t aCallState,
-                                    const nsAString& aNumber,
-                                    uint16_t aNumberPresentation,
-                                    const nsAString& aName,
-                                    uint16_t aNamePresentation,
-                                    bool aIsOutgoing,
-                                    bool aIsEmergency,
-                                    bool aIsConference,
-                                    bool aIsSwitchable,
-                                    bool aIsMergeable)
+TelephonyParent::EnumerateCallState(nsITelephonyCallInfo* aInfo)
 {
   MOZ_CRASH("Not a EnumerateCalls request!");
 }
@@ -358,17 +323,6 @@ TelephonyParent::NotifyConferenceError(const nsAString& aName,
 }
 
 NS_IMETHODIMP
-TelephonyParent::NotifyError(uint32_t aClientId,
-                             int32_t aCallIndex,
-                             const nsAString& aError)
-{
-  NS_ENSURE_TRUE(!mActorDestroyed, NS_ERROR_FAILURE);
-
-  return SendNotifyCallError(aClientId, aCallIndex, nsString(aError))
-      ? NS_OK : NS_ERROR_FAILURE;
-}
-
-NS_IMETHODIMP
 TelephonyParent::SupplementaryServiceNotification(uint32_t aClientId,
                                                   int32_t aCallIndex,
                                                   uint16_t aNotification)
@@ -384,11 +338,12 @@ TelephonyParent::SupplementaryServiceNotification(uint32_t aClientId,
  ******************************************************************************/
 
 NS_IMPL_ISUPPORTS(TelephonyRequestParent,
-                  nsITelephonyListener,
-                  nsITelephonyCallback)
+                  nsITelephonyListener)
 
 TelephonyRequestParent::TelephonyRequestParent()
-  : mActorDestroyed(false)
+  : mActorDestroyed(false),
+    mCallback(new Callback(*this)),
+    mDialCallback(new DialCallback(*this))
 {
 }
 
@@ -401,60 +356,18 @@ TelephonyRequestParent::ActorDestroy(ActorDestroyReason why)
   mActorDestroyed = true;
 }
 
-bool
-TelephonyRequestParent::DoRequest(const EnumerateCallsRequest& aRequest)
+nsresult
+TelephonyRequestParent::SendResponse(const IPCTelephonyResponse& aResponse)
 {
-  nsresult rv = NS_ERROR_FAILURE;
+  NS_ENSURE_TRUE(!mActorDestroyed, NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  if (service) {
-    rv = service->EnumerateCalls(this);
-  }
-
-  if (NS_FAILED(rv)) {
-    return NS_SUCCEEDED(EnumerateCallStateComplete());
-  }
-
-  return true;
-}
-
-bool
-TelephonyRequestParent::DoRequest(const DialRequest& aRequest)
-{
-  nsCOMPtr<nsITelephonyService> service =
-    do_GetService(TELEPHONY_SERVICE_CONTRACTID);
-  if (service) {
-    service->Dial(aRequest.clientId(), aRequest.number(),
-                   aRequest.isEmergency(), this);
-  } else {
-    return NS_SUCCEEDED(NotifyDialError(NS_LITERAL_STRING("InvalidStateError")));
-  }
-
-  return true;
+  return Send__delete__(this, aResponse) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 // nsITelephonyListener
 
 NS_IMETHODIMP
-TelephonyRequestParent::CallStateChanged(uint32_t aClientId,
-                                         uint32_t aCallIndex,
-                                         uint16_t aCallState,
-                                         const nsAString& aNumber,
-                                         uint16_t aNumberPresentation,
-                                         const nsAString& aName,
-                                         uint16_t aNamePresentation,
-                                         bool aIsOutgoing,
-                                         bool aIsEmergency,
-                                         bool aIsConference,
-                                         bool aIsSwitchable,
-                                         bool aIsMergeable)
-{
-  MOZ_CRASH("Not a TelephonyParent!");
-}
-
-NS_IMETHODIMP
-TelephonyRequestParent::ConferenceCallStateChanged(uint16_t aCallState)
+TelephonyRequestParent::CallStateChanged(uint32_t aLength, nsITelephonyCallInfo** aAllInfo)
 {
   MOZ_CRASH("Not a TelephonyParent!");
 }
@@ -468,27 +381,11 @@ TelephonyRequestParent::EnumerateCallStateComplete()
 }
 
 NS_IMETHODIMP
-TelephonyRequestParent::EnumerateCallState(uint32_t aClientId,
-                                           uint32_t aCallIndex,
-                                           uint16_t aCallState,
-                                           const nsAString& aNumber,
-                                           uint16_t aNumberPresentation,
-                                           const nsAString& aName,
-                                           uint16_t aNamePresentation,
-                                           bool aIsOutgoing,
-                                           bool aIsEmergency,
-                                           bool aIsConference,
-                                           bool aIsSwitchable,
-                                           bool aIsMergeable)
+TelephonyRequestParent::EnumerateCallState(nsITelephonyCallInfo* aInfo)
 {
   NS_ENSURE_TRUE(!mActorDestroyed, NS_ERROR_FAILURE);
 
-  IPCCallStateData data(aCallIndex, aCallState, nsString(aNumber),
-                        aNumberPresentation, nsString(aName), aNamePresentation,
-                        aIsOutgoing, aIsEmergency, aIsConference,
-                        aIsSwitchable, aIsMergeable);
-  return SendNotifyEnumerateCallState(aClientId, data) ? NS_OK
-                                                       : NS_ERROR_FAILURE;
+  return SendNotifyEnumerateCallState(aInfo) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -509,14 +406,6 @@ TelephonyRequestParent::NotifyConferenceError(const nsAString& aName,
 }
 
 NS_IMETHODIMP
-TelephonyRequestParent::NotifyError(uint32_t aClientId,
-                                    int32_t aCallIndex,
-                                    const nsAString& aError)
-{
-  MOZ_CRASH("Not a TelephonyParent!");
-}
-
-NS_IMETHODIMP
 TelephonyRequestParent::SupplementaryServiceNotification(uint32_t aClientId,
                                                          int32_t aCallIndex,
                                                          uint16_t aNotification)
@@ -524,22 +413,111 @@ TelephonyRequestParent::SupplementaryServiceNotification(uint32_t aClientId,
   MOZ_CRASH("Not a TelephonyParent!");
 }
 
-// nsITelephonyCallback
+/*******************************************************************************
+ * TelephonyRequestParent::Callback
+ ******************************************************************************/
 
-NS_IMETHODIMP
-TelephonyRequestParent::NotifyDialError(const nsAString& aError)
+NS_IMPL_ISUPPORTS(TelephonyRequestParent::Callback,
+                  nsITelephonyCallback)
+
+nsresult TelephonyRequestParent::Callback::SendResponse(const IPCTelephonyResponse& aResponse)
 {
-  NS_ENSURE_TRUE(!mActorDestroyed, NS_ERROR_FAILURE);
-
-  return (SendNotifyDialError(nsString(aError)) &&
-          Send__delete__(this, DialResponse())) ? NS_OK : NS_ERROR_FAILURE;
+  return mParent.SendResponse(aResponse);
 }
 
 NS_IMETHODIMP
-TelephonyRequestParent::NotifyDialSuccess(uint32_t aCallIndex)
+TelephonyRequestParent::Callback::NotifySuccess()
 {
-  NS_ENSURE_TRUE(!mActorDestroyed, NS_ERROR_FAILURE);
+  return SendResponse(SuccessResponse());
+}
 
-  return (SendNotifyDialSuccess(aCallIndex) &&
-          Send__delete__(this, DialResponse())) ? NS_OK : NS_ERROR_FAILURE;
+NS_IMETHODIMP
+TelephonyRequestParent::Callback::NotifyError(const nsAString& aError)
+{
+  return SendResponse(ErrorResponse(nsAutoString(aError)));
+}
+
+/*******************************************************************************
+ * TelephonyRequestParent::DialCallback
+ ******************************************************************************/
+
+NS_IMPL_ISUPPORTS_INHERITED(TelephonyRequestParent::DialCallback,
+                            TelephonyRequestParent::Callback,
+                            nsITelephonyDialCallback)
+
+NS_IMETHODIMP
+TelephonyRequestParent::DialCallback::NotifyDialMMI(const nsAString& aServiceCode)
+{
+  NS_ENSURE_TRUE(!mParent.mActorDestroyed, NS_ERROR_FAILURE);
+
+  return mParent.SendNotifyDialMMI(nsAutoString(aServiceCode)) ? NS_OK : NS_ERROR_FAILURE;
+}
+
+NS_IMETHODIMP
+TelephonyRequestParent::DialCallback::NotifyDialCallSuccess(uint32_t aClientId,
+                                                            uint32_t aCallIndex,
+                                                            const nsAString& aNumber)
+{
+  return SendResponse(DialResponseCallSuccess(aClientId, aCallIndex,
+                                              nsAutoString(aNumber)));
+}
+
+NS_IMETHODIMP
+TelephonyRequestParent::DialCallback::NotifyDialMMISuccess(const nsAString& aStatusMessage)
+{
+  return SendResponse(DialResponseMMISuccess(nsAutoString(aStatusMessage),
+                                             AdditionalInformation(mozilla::void_t())));
+}
+
+NS_IMETHODIMP
+TelephonyRequestParent::DialCallback::NotifyDialMMISuccessWithInteger(const nsAString& aStatusMessage,
+                                                                      uint16_t aAdditionalInformation)
+{
+  return SendResponse(DialResponseMMISuccess(nsAutoString(aStatusMessage),
+                                             AdditionalInformation(aAdditionalInformation)));
+}
+
+NS_IMETHODIMP
+TelephonyRequestParent::DialCallback::NotifyDialMMISuccessWithStrings(const nsAString& aStatusMessage,
+                                                                      uint32_t aCount,
+                                                                      const char16_t** aAdditionalInformation)
+{
+  nsTArray<nsString> additionalInformation;
+  nsString* infos = additionalInformation.AppendElements(aCount);
+  for (uint32_t i = 0; i < aCount; i++) {
+    infos[i].Rebind(aAdditionalInformation[i],
+                    nsCharTraits<char16_t>::length(aAdditionalInformation[i]));
+  }
+
+  return SendResponse(DialResponseMMISuccess(nsAutoString(aStatusMessage),
+                                             AdditionalInformation(additionalInformation)));
+}
+
+NS_IMETHODIMP
+TelephonyRequestParent::DialCallback::NotifyDialMMISuccessWithCallForwardingOptions(const nsAString& aStatusMessage,
+                                                                                    uint32_t aCount,
+                                                                                    nsIMobileCallForwardingOptions** aAdditionalInformation)
+{
+  nsTArray<nsIMobileCallForwardingOptions*> additionalInformation;
+  for (uint32_t i = 0; i < aCount; i++) {
+    additionalInformation.AppendElement(aAdditionalInformation[i]);
+  }
+
+  return SendResponse(DialResponseMMISuccess(nsAutoString(aStatusMessage),
+                                             AdditionalInformation(additionalInformation)));
+}
+
+NS_IMETHODIMP
+TelephonyRequestParent::DialCallback::NotifyDialMMIError(const nsAString& aError)
+{
+  return SendResponse(DialResponseMMIError(nsAutoString(aError),
+                                           AdditionalInformation(mozilla::void_t())));
+}
+
+NS_IMETHODIMP
+TelephonyRequestParent::DialCallback::NotifyDialMMIErrorWithInfo(const nsAString& aError,
+                                                                 uint16_t aInfo)
+{
+  return SendResponse(DialResponseMMIError(nsAutoString(aError),
+                                           AdditionalInformation(aInfo)));
 }

@@ -30,10 +30,10 @@ function test()
 //    JS_SetReservedSlot(cx, blockObj, index, PRIVATE_TO_JSVAL(pn));
 // but this uses reserved slots as though they were unlimited.
 // blockObj only has 2.
-  let (a=0, b=1, c=2) {}
+  { let a=0, b=1, c=2; }
 
 // In RecycleTree at ../jsparse.cpp:315, we hit
-//     MOZ_ASSUME_UNREACHABLE("RecycleUseDefKids");
+//     MOZ_CRASH("RecycleUseDefKids");
 // pn->pn_type is TOK_UNARYOP
 // pn->pn_op   is JSOP_XMLNAME
 // pn->pn_defn is 1
@@ -52,7 +52,7 @@ function test()
 //
   try
   {
-    for (var [x] = x in y) var x;
+    for (var [x] in y) var x;
   }
   catch(ex)
   {

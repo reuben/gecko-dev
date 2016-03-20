@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "BasicCanvasLayer.h"
+#include "AsyncCanvasRenderer.h"
 #include "basic/BasicLayers.h"          // for BasicLayerManager
 #include "basic/BasicLayersImpl.h"      // for GetEffectiveOperator
 #include "mozilla/mozalloc.h"           // for operator new
@@ -28,31 +29,36 @@ BasicCanvasLayer::Paint(DrawTarget* aDT,
   if (IsHidden())
     return;
 
-  FirePreTransactionCallback();
-  UpdateTarget();
-  FireDidTransactionCallback();
+  if (IsDirty()) {
+    Painted();
+
+    FirePreTransactionCallback();
+    UpdateTarget();
+    FireDidTransactionCallback();
+  }
 
   if (!mSurface) {
     return;
   }
 
-  Matrix m;
-  if (mNeedsYFlip) {
-    m = aDT->GetTransform();
-    Matrix newTransform = m;
-    newTransform.Translate(0.0f, mBounds.height);
-    newTransform.Scale(1.0f, -1.0f);
-    aDT->SetTransform(newTransform);
+  const bool needsYFlip = (mOriginPos == gl::OriginPos::BottomLeft);
+
+  Matrix oldTM;
+  if (needsYFlip) {
+    oldTM = aDT->GetTransform();
+    aDT->SetTransform(Matrix(oldTM).
+                        PreTranslate(0.0f, mBounds.height).
+                        PreScale(1.0f, -1.0f));
   }
 
   FillRectWithMask(aDT, aDeviceOffset,
                    Rect(0, 0, mBounds.width, mBounds.height),
-                   mSurface, ToFilter(mFilter),
+                   mSurface, mFilter,
                    DrawOptions(GetEffectiveOpacity(), GetEffectiveOperator(this)),
                    aMaskLayer);
 
-  if (mNeedsYFlip) {
-    aDT->SetTransform(m);
+  if (needsYFlip) {
+    aDT->SetTransform(oldTM);
   }
 }
 
@@ -60,9 +66,9 @@ already_AddRefed<CanvasLayer>
 BasicLayerManager::CreateCanvasLayer()
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-  nsRefPtr<CanvasLayer> layer = new BasicCanvasLayer(this);
+  RefPtr<CanvasLayer> layer = new BasicCanvasLayer(this);
   return layer.forget();
 }
 
-}
-}
+} // namespace layers
+} // namespace mozilla

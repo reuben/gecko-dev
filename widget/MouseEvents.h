@@ -47,8 +47,10 @@ public:
   uint32_t pointerId;
   uint32_t tiltX;
   uint32_t tiltY;
+  bool retargetedByPointerCapture;
 
-  WidgetPointerHelper() : convertToPointer(true), pointerId(0), tiltX(0), tiltY(0) {}
+  WidgetPointerHelper() : convertToPointer(true), pointerId(0), tiltX(0), tiltY(0),
+                          retargetedByPointerCapture(false) {}
 
   void AssignPointerHelperData(const WidgetPointerHelper& aEvent)
   {
@@ -56,6 +58,7 @@ public:
     pointerId = aEvent.pointerId;
     tiltX = aEvent.tiltX;
     tiltY = aEvent.tiltY;
+    retargetedByPointerCapture = aEvent.retargetedByPointerCapture;
   }
 };
 
@@ -71,24 +74,31 @@ private:
 
 protected:
   WidgetMouseEventBase()
+    : button(0)
+    , buttons(0)
+    , pressure(0)
+    , hitCluster(false)
+    , inputSource(nsIDOMMouseEvent::MOZ_SOURCE_MOUSE)
   {
   }
 
-  WidgetMouseEventBase(bool aIsTrusted, uint32_t aMessage, nsIWidget* aWidget,
-                       nsEventStructType aStructType) :
-    WidgetInputEvent(aIsTrusted, aMessage, aWidget, aStructType),
-    button(0), buttons(0), pressure(0),
-    inputSource(nsIDOMMouseEvent::MOZ_SOURCE_MOUSE)
+  WidgetMouseEventBase(bool aIsTrusted, EventMessage aMessage,
+                       nsIWidget* aWidget, EventClassID aEventClassID)
+    : WidgetInputEvent(aIsTrusted, aMessage, aWidget, aEventClassID)
+    , button(0)
+    , buttons(0)
+    , pressure(0)
+    , hitCluster(false)
+    , inputSource(nsIDOMMouseEvent::MOZ_SOURCE_MOUSE)
  {
  }
 
 public:
-  virtual WidgetMouseEventBase* AsMouseEventBase() MOZ_OVERRIDE { return this; }
+  virtual WidgetMouseEventBase* AsMouseEventBase() override { return this; }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
     MOZ_CRASH("WidgetMouseEventBase must not be most-subclass");
-    return nullptr;
   }
 
   /// The possible related target
@@ -122,12 +132,20 @@ public:
 
   // Finger or touch pressure of event. It ranges between 0.0 and 1.0.
   float pressure;
+  // Touch near a cluster of links (true)
+  bool hitCluster;
 
   // Possible values at nsIDOMMouseEvent
   uint16_t inputSource;
 
   // ID of the canvas HitRegion
   nsString region;
+
+  bool IsLeftButtonPressed() const { return !!(buttons & eLeftButtonFlag); }
+  bool IsRightButtonPressed() const { return !!(buttons & eRightButtonFlag); }
+  bool IsMiddleButtonPressed() const { return !!(buttons & eMiddleButtonFlag); }
+  bool Is4thButtonPressed() const { return !!(buttons & e4thButtonFlag); }
+  bool Is5thButtonPressed() const { return !!(buttons & e5thButtonFlag); }
 
   void AssignMouseEventBaseData(const WidgetMouseEventBase& aEvent,
                                 bool aCopyTargets)
@@ -138,6 +156,7 @@ public:
     button = aEvent.button;
     buttons = aEvent.buttons;
     pressure = aEvent.pressure;
+    hitCluster = aEvent.hitCluster;
     inputSource = aEvent.inputSource;
   }
 
@@ -146,7 +165,7 @@ public:
    */
   bool IsLeftClickEvent() const
   {
-    return message == NS_MOUSE_CLICK && button == eLeftButton;
+    return mMessage == eMouseClick && button == eLeftButton;
   }
 };
 
@@ -181,18 +200,25 @@ public:
 
 protected:
   WidgetMouseEvent()
+    : acceptActivation(false)
+    , ignoreRootScrollFrame(false)
+    , clickCount(0)
   {
   }
 
-  WidgetMouseEvent(bool aIsTrusted, uint32_t aMessage, nsIWidget* aWidget,
-                   nsEventStructType aStructType, reasonType aReason) :
-    WidgetMouseEventBase(aIsTrusted, aMessage, aWidget, aStructType),
-    acceptActivation(false), ignoreRootScrollFrame(false),
-    reason(aReason), context(eNormal), exit(eChild), clickCount(0)
+  WidgetMouseEvent(bool aIsTrusted, EventMessage aMessage, nsIWidget* aWidget,
+                   EventClassID aEventClassID, reasonType aReason)
+    : WidgetMouseEventBase(aIsTrusted, aMessage, aWidget, aEventClassID)
+    , acceptActivation(false)
+    , ignoreRootScrollFrame(false)
+    , reason(aReason)
+    , context(eNormal)
+    , exit(eChild)
+    , clickCount(0)
   {
     switch (aMessage) {
-      case NS_MOUSEENTER:
-      case NS_MOUSELEAVE:
+      case eMouseEnter:
+      case eMouseLeave:
         mFlags.mBubbles = false;
         mFlags.mCancelable = false;
         break;
@@ -202,21 +228,21 @@ protected:
   }
 
 public:
-  virtual WidgetMouseEvent* AsMouseEvent() MOZ_OVERRIDE { return this; }
+  virtual WidgetMouseEvent* AsMouseEvent() override { return this; }
 
-  WidgetMouseEvent(bool aIsTrusted, uint32_t aMessage, nsIWidget* aWidget,
+  WidgetMouseEvent(bool aIsTrusted, EventMessage aMessage, nsIWidget* aWidget,
                    reasonType aReason, contextType aContext = eNormal) :
-    WidgetMouseEventBase(aIsTrusted, aMessage, aWidget, NS_MOUSE_EVENT),
+    WidgetMouseEventBase(aIsTrusted, aMessage, aWidget, eMouseEventClass),
     acceptActivation(false), ignoreRootScrollFrame(false),
     reason(aReason), context(aContext), exit(eChild), clickCount(0)
   {
     switch (aMessage) {
-      case NS_MOUSEENTER:
-      case NS_MOUSELEAVE:
+      case eMouseEnter:
+      case eMouseLeave:
         mFlags.mBubbles = false;
         mFlags.mCancelable = false;
         break;
-      case NS_CONTEXTMENU:
+      case eContextMenu:
         button = (context == eNormal) ? eRightButton : eLeftButton;
         break;
       default:
@@ -227,20 +253,20 @@ public:
 #ifdef DEBUG
   virtual ~WidgetMouseEvent()
   {
-    NS_WARN_IF_FALSE(message != NS_CONTEXTMENU ||
+    NS_WARN_IF_FALSE(mMessage != eContextMenu ||
                      button ==
                        ((context == eNormal) ? eRightButton : eLeftButton),
-                     "Wrong button set to NS_CONTEXTMENU event?");
+                     "Wrong button set to eContextMenu event?");
   }
 #endif
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_MOUSE_EVENT,
+    MOZ_ASSERT(mClass == eMouseEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
     WidgetMouseEvent* result =
-      new WidgetMouseEvent(false, message, nullptr, reason, context);
+      new WidgetMouseEvent(false, mMessage, nullptr, reason, context);
     result->AssignMouseEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -274,7 +300,7 @@ public:
    */
   bool IsContextMenuKeyEvent() const
   {
-    return message == NS_CONTEXTMENU && context == eContextMenuKey;
+    return mMessage == eContextMenu && context == eContextMenuKey;
   }
 
   /**
@@ -293,25 +319,33 @@ public:
 
 class WidgetDragEvent : public WidgetMouseEvent
 {
+private:
+  friend class mozilla::dom::PBrowserParent;
+  friend class mozilla::dom::PBrowserChild;
+protected:
+  WidgetDragEvent()
+    : userCancelled(false)
+    , mDefaultPreventedOnContent(false)
+  {
+  }
 public:
-  virtual WidgetDragEvent* AsDragEvent() MOZ_OVERRIDE { return this; }
+  virtual WidgetDragEvent* AsDragEvent() override { return this; }
 
-  WidgetDragEvent(bool aIsTrusted, uint32_t aMessage, nsIWidget* aWidget) :
-    WidgetMouseEvent(aIsTrusted, aMessage, aWidget, NS_DRAG_EVENT, eReal),
-    userCancelled(false), mDefaultPreventedOnContent(false)
+  WidgetDragEvent(bool aIsTrusted, EventMessage aMessage, nsIWidget* aWidget)
+    : WidgetMouseEvent(aIsTrusted, aMessage, aWidget, eDragEventClass, eReal)
+    , userCancelled(false)
+    , mDefaultPreventedOnContent(false)
   {
     mFlags.mCancelable =
-      (aMessage != NS_DRAGDROP_EXIT_SYNTH &&
-       aMessage != NS_DRAGDROP_LEAVE_SYNTH &&
-       aMessage != NS_DRAGDROP_END);
+      (aMessage != eDragExit && aMessage != eDragLeave && aMessage != eDragEnd);
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_DRAG_EVENT,
+    MOZ_ASSERT(mClass == eDragEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
-    WidgetDragEvent* result = new WidgetDragEvent(false, message, nullptr);
+    WidgetDragEvent* result = new WidgetDragEvent(false, mMessage, nullptr);
     result->AssignDragEventData(*this, true);
     result->mFlags = mFlags;
     return result;
@@ -349,40 +383,44 @@ class WidgetMouseScrollEvent : public WidgetMouseEventBase
 {
 private:
   WidgetMouseScrollEvent()
+    : delta(0)
+    , isHorizontal(false)
   {
   }
 
 public:
-  virtual WidgetMouseScrollEvent* AsMouseScrollEvent() MOZ_OVERRIDE
+  virtual WidgetMouseScrollEvent* AsMouseScrollEvent() override
   {
     return this;
   }
 
-  WidgetMouseScrollEvent(bool aIsTrusted, uint32_t aMessage,
-                         nsIWidget* aWidget) :
-    WidgetMouseEventBase(aIsTrusted, aMessage, aWidget, NS_MOUSE_SCROLL_EVENT),
-    delta(0), isHorizontal(false)
+  WidgetMouseScrollEvent(bool aIsTrusted, EventMessage aMessage,
+                         nsIWidget* aWidget)
+    : WidgetMouseEventBase(aIsTrusted, aMessage, aWidget,
+                           eMouseScrollEventClass)
+    , delta(0)
+    , isHorizontal(false)
   {
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_MOUSE_SCROLL_EVENT,
+    MOZ_ASSERT(mClass == eMouseScrollEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
     WidgetMouseScrollEvent* result =
-      new WidgetMouseScrollEvent(false, message, nullptr);
+      new WidgetMouseScrollEvent(false, mMessage, nullptr);
     result->AssignMouseScrollEventData(*this, true);
     result->mFlags = mFlags;
     return result;
   }
 
   // The delta value of mouse scroll event.
-  // If the event message is NS_MOUSE_SCROLL, the value indicates scroll amount
-  // in lines.  However, if the value is nsIDOMUIEvent::SCROLL_PAGE_UP or
-  // nsIDOMUIEvent::SCROLL_PAGE_DOWN, the value inducates one page scroll.
-  // If the event message is NS_MOUSE_PIXEL_SCROLL, the value indicates scroll
-  // amount in pixels.
+  // If the event message is eLegacyMouseLineOrPageScroll, the value indicates
+  // scroll amount in lines.  However, if the value is
+  // nsIDOMUIEvent::SCROLL_PAGE_UP or nsIDOMUIEvent::SCROLL_PAGE_DOWN, the
+  // value inducates one page scroll.  If the event message is
+  // eLegacyMousePixelScroll, the value indicates scroll amount in pixels.
   int32_t delta;
 
   // If this is true, it may cause to scroll horizontally.
@@ -410,32 +448,67 @@ private:
   friend class mozilla::dom::PBrowserChild;
 
   WidgetWheelEvent()
+    : deltaX(0.0)
+    , deltaY(0.0)
+    , deltaZ(0.0)
+    , deltaMode(nsIDOMWheelEvent::DOM_DELTA_PIXEL)
+    , customizedByUserPrefs(false)
+    , isMomentum(false)
+    , mIsNoLineOrPageDelta(false)
+    , lineOrPageDeltaX(0)
+    , lineOrPageDeltaY(0)
+    , scrollType(SCROLL_DEFAULT)
+    , overflowDeltaX(0.0)
+    , overflowDeltaY(0.0)
+    , mViewPortIsOverscrolled(false)
+    , mCanTriggerSwipe(false)
+    , mAllowToOverrideSystemScrollSpeed(false)
   {
   }
 
 public:
-  virtual WidgetWheelEvent* AsWheelEvent() MOZ_OVERRIDE { return this; }
+  virtual WidgetWheelEvent* AsWheelEvent() override { return this; }
 
-  WidgetWheelEvent(bool aIsTrusted, uint32_t aMessage, nsIWidget* aWidget) :
-    WidgetMouseEventBase(aIsTrusted, aMessage, aWidget, NS_WHEEL_EVENT),
-    deltaX(0.0), deltaY(0.0), deltaZ(0.0),
-    deltaMode(nsIDOMWheelEvent::DOM_DELTA_PIXEL),
-    customizedByUserPrefs(false), isMomentum(false), isPixelOnlyDevice(false),
-    lineOrPageDeltaX(0), lineOrPageDeltaY(0), scrollType(SCROLL_DEFAULT),
-    overflowDeltaX(0.0), overflowDeltaY(0.0),
-    mViewPortIsOverscrolled(false)
+  WidgetWheelEvent(bool aIsTrusted, EventMessage aMessage, nsIWidget* aWidget)
+    : WidgetMouseEventBase(aIsTrusted, aMessage, aWidget, eWheelEventClass)
+    , deltaX(0.0)
+    , deltaY(0.0)
+    , deltaZ(0.0)
+    , deltaMode(nsIDOMWheelEvent::DOM_DELTA_PIXEL)
+    , customizedByUserPrefs(false)
+    , mayHaveMomentum(false)
+    , isMomentum(false)
+    , mIsNoLineOrPageDelta(false)
+    , lineOrPageDeltaX(0)
+    , lineOrPageDeltaY(0)
+    , scrollType(SCROLL_DEFAULT)
+    , overflowDeltaX(0.0)
+    , overflowDeltaY(0.0)
+    , mViewPortIsOverscrolled(false)
+    , mCanTriggerSwipe(false)
+    , mAllowToOverrideSystemScrollSpeed(true)
   {
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_WHEEL_EVENT,
+    MOZ_ASSERT(mClass == eWheelEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
-    WidgetWheelEvent* result = new WidgetWheelEvent(false, message, nullptr);
+    WidgetWheelEvent* result = new WidgetWheelEvent(false, mMessage, nullptr);
     result->AssignWheelEventData(*this, true);
     result->mFlags = mFlags;
     return result;
+  }
+
+  // On OS X, scroll gestures that start at the edge of the scrollable range
+  // can result in a swipe gesture. For the first wheel event of such a
+  // gesture, call TriggersSwipe() after the event has been processed
+  // in order to find out whether a swipe should be started.
+  bool TriggersSwipe() const
+  {
+    return mCanTriggerSwipe && mViewPortIsOverscrolled &&
+           this->overflowDeltaX != 0.0;
   }
 
   // NOTE: deltaX, deltaY and deltaZ may be customized by
@@ -455,18 +528,21 @@ public:
   // Otherwise, i.e., they are computed from native events, false.
   bool customizedByUserPrefs;
 
+  // true if the momentum events directly tied to this event may follow it.
+  bool mayHaveMomentum;
   // true if the event is caused by momentum.
   bool isMomentum;
 
   // If device event handlers don't know when they should set lineOrPageDeltaX
   // and lineOrPageDeltaY, this is true.  Otherwise, false.
-  // If isPixelOnlyDevice is true, ESM will generate NS_MOUSE_SCROLL events
-  // when accumulated pixel delta values reach a line height.
-  bool isPixelOnlyDevice;
+  // If mIsNoLineOrPageDelta is true, ESM will generate
+  // eLegacyMouseLineOrPageScroll events when accumulated delta values reach
+  // a line height.
+  bool mIsNoLineOrPageDelta;
 
   // If widget sets lineOrPageDelta, EventStateManager will dispatch
-  // NS_MOUSE_SCROLL event for compatibility.  Note that the delta value means
-  // pages if the deltaMode is DOM_DELTA_PAGE, otherwise, lines.
+  // eLegacyMouseLineOrPageScroll event for compatibility.  Note that the delta
+  // value means pages if the deltaMode is DOM_DELTA_PAGE, otherwise, lines.
   int32_t lineOrPageDeltaX;
   int32_t lineOrPageDeltaY;
 
@@ -521,6 +597,15 @@ public:
   // overscrolled.
   bool mViewPortIsOverscrolled;
 
+  // The wheel event can trigger a swipe to start if it's overscrolling the
+  // viewport.
+  bool mCanTriggerSwipe;
+
+  // If mAllowToOverrideSystemScrollSpeed is true, the scroll speed may be
+  // overridden.  Otherwise, the scroll speed won't be overridden even if
+  // it's enabled by the pref.
+  bool mAllowToOverrideSystemScrollSpeed;
+
   void AssignWheelEventData(const WidgetWheelEvent& aEvent, bool aCopyTargets)
   {
     AssignMouseEventBaseData(aEvent, aCopyTargets);
@@ -530,15 +615,40 @@ public:
     deltaZ = aEvent.deltaZ;
     deltaMode = aEvent.deltaMode;
     customizedByUserPrefs = aEvent.customizedByUserPrefs;
+    mayHaveMomentum = aEvent.mayHaveMomentum;
     isMomentum = aEvent.isMomentum;
-    isPixelOnlyDevice = aEvent.isPixelOnlyDevice;
+    mIsNoLineOrPageDelta = aEvent.mIsNoLineOrPageDelta;
     lineOrPageDeltaX = aEvent.lineOrPageDeltaX;
     lineOrPageDeltaY = aEvent.lineOrPageDeltaY;
     scrollType = aEvent.scrollType;
     overflowDeltaX = aEvent.overflowDeltaX;
     overflowDeltaY = aEvent.overflowDeltaY;
     mViewPortIsOverscrolled = aEvent.mViewPortIsOverscrolled;
+    mCanTriggerSwipe = aEvent.mCanTriggerSwipe;
+    mAllowToOverrideSystemScrollSpeed =
+      aEvent.mAllowToOverrideSystemScrollSpeed;
   }
+
+  // System scroll speed settings may be too slow at using Gecko.  In such
+  // case, we should override the scroll speed computed with system settings.
+  // Following methods return preferred delta values which are multiplied by
+  // factors specified by prefs.  If system scroll speed shouldn't be
+  // overridden (e.g., this feature is disabled by pref), they return raw
+  // delta values.
+  double OverriddenDeltaX() const;
+  double OverriddenDeltaY() const;
+
+  // Compute the overridden delta value.  This may be useful for suppressing
+  // too fast scroll by system scroll speed overriding when widget sets
+  // mAllowToOverrideSystemScrollSpeed.
+  static double ComputeOverriddenDelta(double aDelta, bool aIsForVertical);
+
+private:
+  static bool sInitialized;
+  static bool sIsSystemScrollSpeedOverrideEnabled;
+  static int32_t sOverrideFactorX;
+  static int32_t sOverrideFactorY;
+  static void Initialize();
 };
 
 /******************************************************************************
@@ -551,14 +661,17 @@ class WidgetPointerEvent : public WidgetMouseEvent
   friend class mozilla::dom::PBrowserChild;
 
   WidgetPointerEvent()
+    : width(0)
+    , height(0)
+    , isPrimary(true)
   {
   }
 
 public:
-  virtual WidgetPointerEvent* AsPointerEvent() MOZ_OVERRIDE { return this; }
+  virtual WidgetPointerEvent* AsPointerEvent() override { return this; }
 
-  WidgetPointerEvent(bool aIsTrusted, uint32_t aMsg, nsIWidget* w)
-    : WidgetMouseEvent(aIsTrusted, aMsg, w, NS_POINTER_EVENT, eReal)
+  WidgetPointerEvent(bool aIsTrusted, EventMessage aMsg, nsIWidget* w)
+    : WidgetMouseEvent(aIsTrusted, aMsg, w, ePointerEventClass, eReal)
     , width(0)
     , height(0)
     , isPrimary(true)
@@ -566,27 +679,27 @@ public:
     UpdateFlags();
   }
 
-  WidgetPointerEvent(const WidgetMouseEvent& aEvent)
+  explicit WidgetPointerEvent(const WidgetMouseEvent& aEvent)
     : WidgetMouseEvent(aEvent)
     , width(0)
     , height(0)
     , isPrimary(true)
   {
-    eventStructType = NS_POINTER_EVENT;
+    mClass = ePointerEventClass;
     UpdateFlags();
   }
 
   void UpdateFlags()
   {
-    switch (message) {
-      case NS_POINTER_ENTER:
-      case NS_POINTER_LEAVE:
+    switch (mMessage) {
+      case ePointerEnter:
+      case ePointerLeave:
         mFlags.mBubbles = false;
         mFlags.mCancelable = false;
         break;
-      case NS_POINTER_CANCEL:
-      case NS_POINTER_GOT_CAPTURE:
-      case NS_POINTER_LOST_CAPTURE:
+      case ePointerCancel:
+      case ePointerGotCapture:
+      case ePointerLostCapture:
         mFlags.mCancelable = false;
         break;
       default:
@@ -594,13 +707,13 @@ public:
     }
   }
 
-  virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE
+  virtual WidgetEvent* Duplicate() const override
   {
-    MOZ_ASSERT(eventStructType == NS_POINTER_EVENT,
+    MOZ_ASSERT(mClass == ePointerEventClass,
                "Duplicate() must be overridden by sub class");
     // Not copying widget, it is a weak reference.
     WidgetPointerEvent* result =
-      new WidgetPointerEvent(false, message, nullptr);
+      new WidgetPointerEvent(false, mMessage, nullptr);
     result->AssignPointerEventData(*this, true);
     result->mFlags = mFlags;
     return result;

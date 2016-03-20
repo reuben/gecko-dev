@@ -110,18 +110,10 @@ function testSteps()
 
 function start()
 {
-  if (!SpecialPowers.isMainProcess()) {
-    todo(false, "Test disabled in child processes, for now");
-    SimpleTest.finish();
-    return;
-  }
-
   SpecialPowers.addPermission("browser", true, document);
-  SpecialPowers.addPermission("browser", true, { manifestURL: manifestURL,
-                                                 isInBrowserElement: false });
+  SpecialPowers.addPermission("browser", true, { manifestURL: manifestURL });
   SpecialPowers.addPermission("embed-apps", true, document);
-
-  SpecialPowers.setAllAppsLaunchable(true);
+  SpecialPowers.addPermission("indexedDB", true, { manifestURL: manifestURL });
 
   window.addEventListener("unload", function cleanup(event) {
     if (event.target == document) {
@@ -131,6 +123,8 @@ function start()
       SpecialPowers.removePermission("browser",
                                      location.protocol + "//" + appDomain);
       SpecialPowers.removePermission("embed-apps", location.href);
+      SpecialPowers.removePermission("indexedDB",
+                                     location.protocol + "//" + appDomain);
     }
   }, false);
 

@@ -9,15 +9,17 @@
 #include "mozilla/ModuleUtils.h"
 #include "nsMimeTypes.h"
 
+#include "DecodePool.h"
 #include "ImageFactory.h"
-#include "RasterImage.h"
+#include "ShutdownTracker.h"
 #include "SurfaceCache.h"
+#include "SurfacePipe.h"
 
+#include "gfxPrefs.h"
 #include "imgLoader.h"
 #include "imgRequest.h"
 #include "imgRequestProxy.h"
 #include "imgTools.h"
-#include "DiscardTracker.h"
 
 #include "nsICOEncoder.h"
 #include "nsPNGEncoder.h"
@@ -85,10 +87,15 @@ static bool sInitialized = false;
 nsresult
 mozilla::image::InitModule()
 {
-  mozilla::image::DiscardTracker::Initialize();
+  MOZ_ASSERT(NS_IsMainThread());
+  // Make sure the preferences are initialized
+  gfxPrefs::GetSingleton();
+
+  mozilla::image::ShutdownTracker::Initialize();
   mozilla::image::ImageFactory::Initialize();
-  mozilla::image::RasterImage::Initialize();
+  mozilla::image::DecodePool::Initialize();
   mozilla::image::SurfaceCache::Initialize();
+  mozilla::image::SurfacePipe::Initialize();
   imgLoader::GlobalInit();
   sInitialized = true;
   return NS_OK;
@@ -102,7 +109,6 @@ mozilla::image::ShutdownModule()
   }
   imgLoader::Shutdown();
   mozilla::image::SurfaceCache::Shutdown();
-  mozilla::image::DiscardTracker::Shutdown();
   sInitialized = false;
 }
 

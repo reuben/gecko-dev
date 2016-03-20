@@ -4,7 +4,7 @@
 // Test that domain eviction occurs when the cookies per base domain limit is
 // reached, and that expired cookies are evicted before live cookies.
 
-let test_generator = do_run_test();
+var test_generator = do_run_test();
 
 function run_test()
 {
@@ -77,7 +77,7 @@ function do_run_test()
     false, false, false, futureExpiry);
   do_check_eq(countCookies("captchart.com", "captchart.com"), 50);
 
-  let enumerator = Services.cookiemgr.getCookiesFromHost("captchart.com");
+  enumerator = Services.cookiemgr.getCookiesFromHost("captchart.com");
   while (enumerator.hasMoreElements()) {
     let cookie = enumerator.getNext().QueryInterface(Ci.nsICookie2);
     do_check_true(cookie.expiry == futureExpiry);

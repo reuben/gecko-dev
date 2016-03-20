@@ -202,7 +202,7 @@ nsBox::Shutdown()
 }
 
 nsresult
-nsBox::RelayoutChildAtOrdinal(nsBoxLayoutState& aState, nsIFrame* aChild)
+nsBox::RelayoutChildAtOrdinal(nsIFrame* aChild)
 {
   return NS_OK;
 }
@@ -452,11 +452,11 @@ nsBox::GetMaxSize(nsBoxLayoutState& aState)
 }
 
 nscoord
-nsBox::GetFlex(nsBoxLayoutState& aState)
+nsBox::GetFlex()
 {
   nscoord flex = 0;
 
-  nsIFrame::AddCSSFlex(aState, this, flex);
+  nsIFrame::AddCSSFlex(this, flex);
 
   return flex;
 }
@@ -468,7 +468,7 @@ nsIFrame::GetOrdinal()
 
   // When present, attribute value overrides CSS.
   nsIContent* content = GetContent();
-  if (content && content->IsXUL()) {
+  if (content && content->IsXULElement()) {
     nsresult error;
     nsAutoString value;
 
@@ -640,7 +640,7 @@ nsIFrame::AddCSSPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &a
     // ignore 'height' and 'width' attributes if the actual element is not XUL
     // For example, we might be magic XUL frames whose primary content is an HTML
     // <select>
-    if (content && content->IsXUL()) {
+    if (content && content->IsXULElement()) {
         nsAutoString value;
         nsresult error;
 
@@ -681,19 +681,16 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
     if (display->mAppearance) {
       nsITheme *theme = aState.PresContext()->GetTheme();
       if (theme && theme->ThemeSupportsWidget(aState.PresContext(), aBox, display->mAppearance)) {
-        nsIntSize size;
-        nsRenderingContext* rendContext = aState.GetRenderingContext();
-        if (rendContext) {
-          theme->GetMinimumWidgetSize(rendContext, aBox,
-                                      display->mAppearance, &size, &canOverride);
-          if (size.width) {
-            aSize.width = aState.PresContext()->DevPixelsToAppUnits(size.width);
-            aWidthSet = true;
-          }
-          if (size.height) {
-            aSize.height = aState.PresContext()->DevPixelsToAppUnits(size.height);
-            aHeightSet = true;
-          }
+        LayoutDeviceIntSize size;
+        theme->GetMinimumWidgetSize(aState.PresContext(), aBox,
+                                    display->mAppearance, &size, &canOverride);
+        if (size.width) {
+          aSize.width = aState.PresContext()->DevPixelsToAppUnits(size.width);
+          aWidthSet = true;
+        }
+        if (size.height) {
+          aSize.height = aState.PresContext()->DevPixelsToAppUnits(size.height);
+          aHeightSet = true;
         }
       }
     }
@@ -744,7 +741,7 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
     // calc() with percentage is treated like '0' (unset)
 
     nsIContent* content = aBox->GetContent();
-    if (content && content->IsXUL()) {
+    if (content && content->IsXULElement()) {
         nsAutoString value;
         nsresult error;
 
@@ -807,7 +804,7 @@ nsIFrame::AddCSSMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aH
     // percentages and calc() with percentages are treated like 'none'
 
     nsIContent* content = aBox->GetContent();
-    if (content && content->IsXUL()) {
+    if (content && content->IsXULElement()) {
         nsAutoString value;
         nsresult error;
 
@@ -837,7 +834,7 @@ nsIFrame::AddCSSMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aH
 }
 
 bool
-nsIFrame::AddCSSFlex(nsBoxLayoutState& aState, nsIFrame* aBox, nscoord& aFlex)
+nsIFrame::AddCSSFlex(nsIFrame* aBox, nscoord& aFlex)
 {
     bool flexSet = false;
 
@@ -846,7 +843,7 @@ nsIFrame::AddCSSFlex(nsBoxLayoutState& aState, nsIFrame* aBox, nscoord& aFlex)
 
     // attribute value overrides CSS
     nsIContent* content = aBox->GetContent();
-    if (content && content->IsXUL()) {
+    if (content && content->IsXULElement()) {
         nsresult error;
         nsAutoString value;
 
@@ -929,7 +926,7 @@ nsBox::GetChildBox(const nsIFrame* aFrame)
 {
   // box layout ends at box-wrapped frames, so don't allow these frames
   // to report child boxes.
-  return aFrame->IsBoxFrame() ? aFrame->GetFirstPrincipalChild() : nullptr;
+  return aFrame->IsBoxFrame() ? aFrame->PrincipalChildList().FirstChild() : nullptr;
 }
 
 /*static*/ nsIFrame*

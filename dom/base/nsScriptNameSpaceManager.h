@@ -22,11 +22,12 @@
 #define nsScriptNameSpaceManager_h__
 
 #include "mozilla/MemoryReporting.h"
+#include "nsBaseHashtable.h"
 #include "nsIMemoryReporter.h"
 #include "nsIScriptNameSpaceManager.h"
 #include "nsString.h"
 #include "nsID.h"
-#include "pldhash.h"
+#include "PLDHashTable.h"
 #include "nsDOMClassInfo.h"
 #include "nsIObserver.h"
 #include "nsWeakReference.h"
@@ -35,25 +36,14 @@
 
 struct nsGlobalNameStruct
 {
-  struct ConstructorAlias
-  {
-    nsCID mCID;
-    nsString mProtoName;
-    nsGlobalNameStruct* mProto;    
-  };
-
   enum nametype {
     eTypeNotInitialized,
     eTypeNewDOMBinding,
-    eTypeInterface,
     eTypeProperty,
     eTypeNavigatorProperty,
     eTypeExternalConstructor,
     eTypeClassConstructor,
     eTypeClassProto,
-    eTypeExternalClassInfoCreator,
-    eTypeExternalClassInfo,
-    eTypeExternalConstructorAlias
   } mType;
 
   // mChromeOnly is only used for structs that define non-WebIDL things
@@ -64,9 +54,7 @@ struct nsGlobalNameStruct
 
   union {
     int32_t mDOMClassInfoID; // eTypeClassConstructor
-    nsIID mIID; // eTypeInterface, eTypeClassProto
-    nsExternalDOMClassInfoData* mData; // eTypeExternalClassInfo
-    ConstructorAlias* mAlias; // eTypeExternalConstructorAlias
+    nsIID mIID; // eTypeClassProto
     nsCID mCID; // All other types except eTypeNewDOMBinding
   };
 
@@ -79,11 +67,22 @@ struct nsGlobalNameStruct
   mozilla::dom::ConstructorEnabled* mConstructorEnabled;
 };
 
+class GlobalNameMapEntry : public PLDHashEntryHdr
+{
+public:
+  // Our hash table ops don't care about the order of these members.
+  nsString mKey;
+  nsGlobalNameStruct mGlobalName;
 
-class nsIScriptContext;
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
+    // Measurement of the following members may be added later if DMD finds it
+    // is worthwhile:
+    // - mGlobalName
+    return mKey.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+  }
+};
+
 class nsICategoryManager;
-class GlobalNameMapEntry;
-
 
 class nsScriptNameSpaceManager : public nsIObserver,
                                  public nsSupportsWeakReference,
@@ -125,23 +124,6 @@ public:
                               const nsIID *aConstructorProtoIID,
                               bool *aFoundOld);
 
-  nsresult RegisterExternalInterfaces(bool aAsProto);
-
-  nsresult RegisterExternalClassName(const char *aClassName,
-                                     nsCID& aCID);
-
-  // Register the info for an external class. aName must be static
-  // data, it will not be deleted by the DOM code.
-  nsresult RegisterDOMCIData(const char *aName,
-                             nsDOMClassInfoExternalConstructorFnc aConstructorFptr,
-                             const nsIID *aProtoChainInterface,
-                             const nsIID **aInterfaces,
-                             uint32_t aScriptableFlags,
-                             bool aHasClassInterface,
-                             const nsCID *aConstructorCID);
-
-  nsGlobalNameStruct* GetConstructorProto(const nsGlobalNameStruct* aStruct);
-
   void RegisterDefineDOMInterface(const nsAFlatString& aName,
     mozilla::dom::DefineInterface aDefineDOMInterface,
     mozilla::dom::ConstructorEnabled* aConstructorEnabled);
@@ -168,17 +150,29 @@ public:
                                            aConstructorEnabled);
   }
 
-  typedef PLDHashOperator
-  (* NameEnumerator)(const nsAString& aGlobalName,
-                     const nsGlobalNameStruct& aGlobalNameStruct,
-                     void* aClosure);
+  class NameIterator : public PLDHashTable::Iterator
+  {
+  public:
+    typedef PLDHashTable::Iterator Base;
+    explicit NameIterator(PLDHashTable* aTable) : Base(aTable) {}
+    NameIterator(NameIterator&& aOther) : Base(mozilla::Move(aOther.mTable)) {}
 
-  void EnumerateGlobalNames(NameEnumerator aEnumerator,
-                            void* aClosure);
-  void EnumerateNavigatorNames(NameEnumerator aEnumerator,
-                               void* aClosure);
+    const GlobalNameMapEntry* Get() const
+    {
+      return static_cast<const GlobalNameMapEntry*>(Base::Get());
+    }
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
+  private:
+    NameIterator() = delete;
+    NameIterator(const NameIterator&) = delete;
+    NameIterator& operator=(const NameIterator&) = delete;
+    NameIterator& operator=(const NameIterator&&) = delete;
+  };
+
+  NameIterator GlobalNameIter()    { return NameIterator(&mGlobalNames); }
+  NameIterator NavigatorNameIter() { return NameIterator(&mNavigatorNames); }
+
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
 private:
   virtual ~nsScriptNameSpaceManager();
@@ -240,8 +234,6 @@ private:
 
   PLDHashTable mGlobalNames;
   PLDHashTable mNavigatorNames;
-
-  bool mIsInitialized;
 };
 
 #endif /* nsScriptNameSpaceManager_h__ */

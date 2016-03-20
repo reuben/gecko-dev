@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -64,11 +64,7 @@ class nsTWeakRef
 {
 public:
   ~nsTWeakRef()
-  {
-    if (mRef) {
-      mRef->Release();
-    }
-  }
+  {}
 
   /**
    * Construct from an object pointer (may be null).
@@ -86,20 +82,13 @@ public:
    * Construct from another weak reference object.
    */
   explicit nsTWeakRef(const nsTWeakRef<Type>& aOther) : mRef(aOther.mRef)
-  {
-    if (mRef) {
-      mRef->AddRef();
-    }
-  }
+  {}
 
   /**
    * Assign from an object pointer.
    */
   nsTWeakRef<Type>& operator=(Type* aObj)
   {
-    if (mRef) {
-      mRef->Release();
-    }
     if (aObj) {
       mRef = new Inner(aObj);
     } else {
@@ -113,13 +102,7 @@ public:
    */
   nsTWeakRef<Type>& operator=(const nsTWeakRef<Type>& aOther)
   {
-    if (mRef) {
-      mRef->Release();
-    }
     mRef = aOther.mRef;
-    if (mRef) {
-      mRef->AddRef();
-    }
     return *this;
   }
 
@@ -140,7 +123,6 @@ public:
     if (mRef) {
       obj = mRef->mObj;
       mRef->mObj = nullptr;
-      mRef->Release();
       mRef = nullptr;
     } else {
       obj = nullptr;
@@ -157,7 +139,7 @@ public:
    * Allow |*this| to be treated as a |Type*| for convenience.  Use with
    * caution since this method will crash if the referenced object is null.
    */
-  Type* operator->() const
+  Type* operator->() const MOZ_NO_ADDREF_RELEASE_ON_RETURN
   {
     NS_ASSERTION(mRef && mRef->mObj,
                  "You can't dereference a null weak reference with operator->().");
@@ -171,7 +153,7 @@ private:
     int     mCnt;
     Type*   mObj;
 
-    Inner(Type* aObj)
+    explicit Inner(Type* aObj)
       : mCnt(1)
       , mObj(aObj)
     {
@@ -188,7 +170,7 @@ private:
     }
   };
 
-  Inner* mRef;
+  RefPtr<Inner> mRef;
 };
 
 #endif  // nsTWeakRef_h__

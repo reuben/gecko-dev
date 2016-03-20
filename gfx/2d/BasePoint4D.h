@@ -116,9 +116,11 @@ struct BasePoint4D {
   void Normalize() {
     *this /= Length();
   }
+
+  bool HasPositiveWCoord() { return w > 0; }
 };
 
-}
-}
+} // namespace gfx
+} // namespace mozilla
 
 #endif /* MOZILLA_BASEPOINT4D_H_ */

@@ -10,15 +10,20 @@
 #ifndef __sslproto_h_
 #define __sslproto_h_
 
+/* clang-format off */
+
 /* All versions less than 3_0 are treated as SSL version 2 */
 #define SSL_LIBRARY_VERSION_2                   0x0002
 #define SSL_LIBRARY_VERSION_3_0                 0x0300
 #define SSL_LIBRARY_VERSION_TLS_1_0             0x0301
 #define SSL_LIBRARY_VERSION_TLS_1_1             0x0302
 #define SSL_LIBRARY_VERSION_TLS_1_2             0x0303
+#define SSL_LIBRARY_VERSION_TLS_1_3             0x0304
+
 /* Note: this is the internal format, not the wire format */
 #define SSL_LIBRARY_VERSION_DTLS_1_0            0x0302
 #define SSL_LIBRARY_VERSION_DTLS_1_2            0x0303
+#define SSL_LIBRARY_VERSION_DTLS_1_3            0x0304
 
 /* deprecated old name */
 #define SSL_LIBRARY_VERSION_3_1_TLS SSL_LIBRARY_VERSION_TLS_1_0
@@ -26,6 +31,7 @@
 /* The DTLS versions used in the spec */
 #define SSL_LIBRARY_VERSION_DTLS_1_0_WIRE       ((~0x0100) & 0xffff)
 #define SSL_LIBRARY_VERSION_DTLS_1_2_WIRE       ((~0x0102) & 0xffff)
+#define SSL_LIBRARY_VERSION_DTLS_1_3_WIRE       ((~0x0103) & 0xffff)
 
 /* Header lengths of some of the messages */
 #define SSL_HL_ERROR_HBYTES                     3
@@ -173,6 +179,7 @@
 #define TLS_RSA_WITH_AES_128_CBC_SHA256         0x003C
 #define TLS_RSA_WITH_AES_256_CBC_SHA256         0x003D
 
+#define TLS_DHE_DSS_WITH_AES_128_CBC_SHA256     0x0040
 #define TLS_RSA_WITH_CAMELLIA_128_CBC_SHA       0x0041
 #define TLS_DH_DSS_WITH_CAMELLIA_128_CBC_SHA    0x0042
 #define TLS_DH_RSA_WITH_CAMELLIA_128_CBC_SHA    0x0043
@@ -187,6 +194,7 @@
 #define TLS_DHE_DSS_EXPORT1024_WITH_RC4_56_SHA  0x0065
 #define TLS_DHE_DSS_WITH_RC4_128_SHA            0x0066
 #define TLS_DHE_RSA_WITH_AES_128_CBC_SHA256     0x0067
+#define TLS_DHE_DSS_WITH_AES_256_CBC_SHA256     0x006A
 #define TLS_DHE_RSA_WITH_AES_256_CBC_SHA256     0x006B
 
 #define TLS_RSA_WITH_CAMELLIA_256_CBC_SHA       0x0084
@@ -207,6 +215,11 @@
  * back an empty Renegotiation Info (RI) server hello extension.
  */
 #define TLS_EMPTY_RENEGOTIATION_INFO_SCSV       0x00FF
+
+/* TLS_FALLBACK_SCSV is a signaling cipher suite value that indicates that a
+ * handshake is the result of TLS version fallback.
+ */
+#define TLS_FALLBACK_SCSV                       0x5600
 
 /* Cipher Suite Values starting with 0xC000 are defined in informational
  * RFCs.
@@ -249,6 +262,10 @@
 #define TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256   0xC02F
 #define TLS_ECDH_RSA_WITH_AES_128_GCM_SHA256    0xC031
 
+#define TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256   0xCCA8
+#define TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 0xCCA9
+#define TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256     0xCCAA
+
 /* Netscape "experimental" cipher suites. */
 #define SSL_RSA_OLDFIPS_WITH_3DES_EDE_CBC_SHA   0xffe0
 #define SSL_RSA_OLDFIPS_WITH_DES_CBC_SHA        0xffe1
@@ -263,5 +280,7 @@
 #define SRTP_AES128_CM_HMAC_SHA1_32             0x0002
 #define SRTP_NULL_HMAC_SHA1_80                  0x0005
 #define SRTP_NULL_HMAC_SHA1_32                  0x0006
+
+/* clang-format on */
 
 #endif /* __sslproto_h_ */

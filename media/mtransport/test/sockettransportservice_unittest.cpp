@@ -24,18 +24,16 @@
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 
-#include "mtransport_test_utils.h"
 
 #define GTEST_HAS_RTTI 0
 #include "gtest/gtest.h"
 #include "gtest_utils.h"
 
-MtransportTestUtils *test_utils;
-
 namespace {
-class SocketTransportServiceTest : public ::testing::Test {
+class SocketTransportServiceTest : public MtransportTest {
  public:
-  SocketTransportServiceTest() : received_(0),
+  SocketTransportServiceTest() : MtransportTest(),
+                                 received_(0),
                                  readpipe_(nullptr),
                                  writepipe_(nullptr),
                                  registered_(false) {
@@ -78,7 +76,7 @@ class SocketTransportServiceTest : public ::testing::Test {
 // Received an event.
 class EventReceived : public nsRunnable {
 public:
-  EventReceived(SocketTransportServiceTest *test) :
+  explicit EventReceived(SocketTransportServiceTest *test) :
       test_(test) {}
 
   NS_IMETHOD Run() {
@@ -93,7 +91,7 @@ public:
 // Register our listener on the socket
 class RegisterEvent : public nsRunnable {
 public:
-  RegisterEvent(SocketTransportServiceTest *test) :
+  explicit RegisterEvent(SocketTransportServiceTest *test) :
       test_(test) {}
 
   NS_IMETHOD Run() {
@@ -107,10 +105,10 @@ public:
 
 class SocketHandler : public nsASocketHandler {
  public:
-  SocketHandler(SocketTransportServiceTest *test) : test_(test) {
+  explicit SocketHandler(SocketTransportServiceTest *test) : test_(test) {
   }
 
-  void OnSocketReady(PRFileDesc *fd, int16_t outflags) {
+  void OnSocketReady(PRFileDesc *fd, int16_t outflags) override {
     unsigned char buf[1600];
 
     int32_t rv;
@@ -121,15 +119,15 @@ class SocketHandler : public nsASocketHandler {
     }
   }
 
-  void OnSocketDetached(PRFileDesc *fd) {}
+  void OnSocketDetached(PRFileDesc *fd) override {}
 
-  void IsLocal(bool *aIsLocal) {
+  void IsLocal(bool *aIsLocal) override {
     // TODO(jesup): better check? Does it matter? (likely no)
     *aIsLocal = false;
   }
 
-  virtual uint64_t ByteCountSent() { return 0; }
-  virtual uint64_t ByteCountReceived() { return 0; }
+  virtual uint64_t ByteCountSent() override { return 0; }
+  virtual uint64_t ByteCountReceived() override { return 0; }
 
   NS_DECL_ISUPPORTS
 
@@ -143,6 +141,8 @@ class SocketHandler : public nsASocketHandler {
 NS_IMPL_ISUPPORTS0(SocketHandler)
 
 void SocketTransportServiceTest::SetUp() {
+  MtransportTest::SetUp();
+
   // Get the transport service as a dispatch target
   nsresult rv;
   target_ = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
@@ -204,15 +204,3 @@ TEST_F(SocketTransportServiceTest, SendPacket) {
 
 
 }  // end namespace
-
-
-int main(int argc, char **argv) {
-  test_utils = new MtransportTestUtils();
-
-  // Start the tests
-  ::testing::InitGoogleTest(&argc, argv);
-
-  int rv = RUN_ALL_TESTS();
-  delete test_utils;
-  return rv;
-}

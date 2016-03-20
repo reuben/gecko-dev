@@ -7,9 +7,9 @@ Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource:///modules/experiments/Experiments.jsm");
 Cu.import("resource://testing-common/httpd.js");
 
-let gDataRoot;
-let gHttpServer;
-let gManifestObject;
+var gDataRoot;
+var gHttpServer;
+var gManifestObject;
 
 function run_test() {
   run_next_test();
@@ -37,7 +37,6 @@ add_task(function test_setup() {
                              httpRoot + "manifests/handler");
   Services.prefs.setBoolPref("experiments.logging.dump", true);
   Services.prefs.setCharPref("experiments.logging.level", "Trace");
-  disableCertificateChecks();
 });
 
 add_task(function* test_provider_basic() {

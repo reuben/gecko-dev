@@ -4,11 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['tests']
-
 EXTRA_COMPONENTS += [
-    'SettingsManager.js',
-    'SettingsManager.manifest',
+    'SettingsManager.manifest'
+]
+
+EXTRA_PP_COMPONENTS += [
+    'SettingsManager.js'
 ]
 
 if CONFIG['MOZ_B2G']:
@@ -17,8 +18,13 @@ if CONFIG['MOZ_B2G']:
         'SettingsService.manifest',
     ]
 
+    MOCHITEST_CHROME_MANIFESTS += ['tests/chrome.ini']
+
 EXTRA_JS_MODULES += [
-    'SettingsChangeNotifier.jsm',
     'SettingsDB.jsm',
-    'SettingsQueue.jsm',
+    'SettingsRequestManager.jsm'
 ]
+
+MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
+
+XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']

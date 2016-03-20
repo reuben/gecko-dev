@@ -138,6 +138,7 @@ STUB_DECLARE(PRStatus,PR_Sleep,(PRIntervalTime ticks));
 STUB_DECLARE(PRStatus,PR_Unlock,(PRLock *lock));
 STUB_DECLARE(PRStatus,PR_WaitCondVar,(PRCondVar *cvar,
 			PRIntervalTime timeout));
+STUB_DECLARE(char*,PR_GetEnvSecure,(const char *));
 
 
 STUB_DECLARE(SECItem *,SECITEM_AllocItem_Util,(PLArenaPool *arena,
@@ -324,7 +325,7 @@ extern PROffset32
 PR_Seek_stub(PRFileDesc *fd, PROffset32 offset, PRSeekWhence whence)
 {
     int *lfd;
-    int lwhence = SEEK_SET;;
+    int lwhence = SEEK_SET;
     STUB_SAFE_CALL3(PR_Seek, fd, offset, whence);
     lfd = (int *)fd;
     switch (whence) {
@@ -333,6 +334,8 @@ PR_Seek_stub(PRFileDesc *fd, PROffset32 offset, PRSeekWhence whence)
             break;
         case PR_SEEK_END:
             lwhence = SEEK_END;
+            break;
+        case PR_SEEK_SET:
             break;
     }
 
@@ -463,6 +466,13 @@ PR_WaitCondVar_stub(PRCondVar *cvar, PRIntervalTime timeout)
     return PR_FAILURE;
 }
 
+extern char*
+PR_GetEnvSecure_stub(const char *var)
+{
+    STUB_SAFE_CALL1(PR_GetEnvSecure, var);
+    abort();
+    return NULL;
+}
 
 
 extern void
@@ -568,6 +578,7 @@ freebl_InitNSPR(void *lib)
     STUB_FETCH_FUNCTION(PR_Unlock);
     STUB_FETCH_FUNCTION(PR_Lock);
     STUB_FETCH_FUNCTION(PR_DestroyLock);
+    STUB_FETCH_FUNCTION(PR_GetEnvSecure);
     return SECSuccess;
 }
 

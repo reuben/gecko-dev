@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -6,7 +7,6 @@
 #include "mozilla/dom/DOMException.h"
 
 #include "jsprf.h"
-#include "js/OldDebugAPI.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/HoldDropJSObjects.h"
 #include "mozilla/dom/Exceptions.h"
@@ -22,6 +22,7 @@
 #include "xpcprivate.h"
 
 #include "mozilla/dom/DOMExceptionBinding.h"
+#include "mozilla/ErrorResult.h"
 
 using namespace mozilla;
 
@@ -73,6 +74,22 @@ enum DOM4ErrorTypeCodeMap {
 
   /* WebCrypto errors https://dvcs.w3.org/hg/webcrypto-api/raw-file/tip/spec/Overview.html#dfn-DataError */
   OperationError           = 0,
+
+  /* Bluetooth API errors */
+  BtFailError              = 0,
+  BtNotReadyError          = 0,
+  BtNoMemError             = 0,
+  BtBusyError              = 0,
+  BtDoneError              = 0,
+  BtUnsupportedError       = 0,
+  BtParmInvalidError       = 0,
+  BtUnhandledError         = 0,
+  BtAuthFailureError       = 0,
+  BtRmtDevDownError        = 0,
+  BtAuthRejectedError      = 0,
+
+  /* Push API errors */
+  PermissionDeniedError    = 0,
 };
 
 #define DOM4_MSG_DEF(name, message, nsresult) {(nsresult), name, #name, message},
@@ -145,6 +162,8 @@ bool Exception::sEverMadeOneFromFactory = false;
 NS_IMPL_CLASSINFO(Exception, nullptr, nsIClassInfo::DOM_OBJECT,
                   NS_XPCEXCEPTION_CID)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Exception)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+  NS_INTERFACE_MAP_ENTRY(Exception)
   NS_INTERFACE_MAP_ENTRY(nsIException)
   NS_INTERFACE_MAP_ENTRY(nsIXPCException)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIException)
@@ -158,18 +177,18 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(Exception)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Exception)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLocation)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mInner)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mData)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(Exception)
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
-  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mThrownJSVal);
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mThrownJSVal)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Exception)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mLocation)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mInner)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mData)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
   tmp->mThrownJSVal.setNull();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -186,8 +205,6 @@ Exception::Exception(const nsACString& aMessage,
   mInitialized(false),
   mHoldingJSVal(false)
 {
-  SetIsDOMBinding();
-
   // A little hack... The nsIGenericModule nsIClassInfo scheme relies on there
   // having been at least one instance made via the factory. Otherwise, the
   // shared factory/classinsance object never gets created and our QI getter
@@ -231,7 +248,7 @@ Exception::Exception(const nsACString& aMessage,
     }
   }
 
-  Initialize(aMessage, aResult, aName, location, aData, nullptr);
+  Initialize(aMessage, aResult, aName, location, aData);
 }
 
 Exception::Exception()
@@ -280,7 +297,6 @@ Exception::StowJSVal(JS::Value& aVp)
   }
 }
 
-/* readonly attribute AUTF8String message; */
 NS_IMETHODIMP
 Exception::GetMessageMoz(nsACString& aMessage)
 {
@@ -290,7 +306,6 @@ Exception::GetMessageMoz(nsACString& aMessage)
   return NS_OK;
 }
 
-/* readonly attribute nsresult result; */
 NS_IMETHODIMP
 Exception::GetResult(nsresult* aResult)
 {
@@ -301,7 +316,6 @@ Exception::GetResult(nsresult* aResult)
   return NS_OK;
 }
 
-/* readonly attribute AUTF8String name; */
 NS_IMETHODIMP
 Exception::GetName(nsACString& aName)
 {
@@ -323,7 +337,6 @@ Exception::GetName(nsACString& aName)
   return NS_OK;
 }
 
-/* readonly attribute AString filename; */
 NS_IMETHODIMP
 Exception::GetFilename(nsAString& aFilename)
 {
@@ -337,7 +350,6 @@ Exception::GetFilename(nsAString& aFilename)
   return NS_OK;
 }
 
-/* readonly attribute uint32_t lineNumber; */
 NS_IMETHODIMP
 Exception::GetLineNumber(uint32_t *aLineNumber)
 {
@@ -355,7 +367,6 @@ Exception::GetLineNumber(uint32_t *aLineNumber)
   return NS_OK;
 }
 
-/* readonly attribute uint32_t columnNumber; */
 NS_IMETHODIMP
 Exception::GetColumnNumber(uint32_t* aColumnNumber)
 {
@@ -366,7 +377,6 @@ Exception::GetColumnNumber(uint32_t* aColumnNumber)
   return NS_OK;
 }
 
-/* readonly attribute nsIStackFrame location; */
 NS_IMETHODIMP
 Exception::GetLocation(nsIStackFrame** aLocation)
 {
@@ -378,7 +388,6 @@ Exception::GetLocation(nsIStackFrame** aLocation)
   return NS_OK;
 }
 
-/* readonly attribute nsISupports data; */
 NS_IMETHODIMP
 Exception::GetData(nsISupports** aData)
 {
@@ -390,19 +399,6 @@ Exception::GetData(nsISupports** aData)
   return NS_OK;
 }
 
-/* readonly attribute nsIException inner; */
-NS_IMETHODIMP
-Exception::GetInner(nsIException** aException)
-{
-  NS_ENSURE_ARG_POINTER(aException);
-  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
-
-  nsCOMPtr<nsIException> inner = mInner;
-  inner.forget(aException);
-  return NS_OK;
-}
-
-/* AUTF8String toString (); */
 NS_IMETHODIMP
 Exception::ToString(nsACString& _retval)
 {
@@ -444,13 +440,10 @@ Exception::ToString(nsACString& _retval)
   return NS_OK;
 }
 
-/* void initialize (in AUTF8String aMessage, in nsresult aResult,
- *                  in AUTF8String aName, in nsIStackFrame aLocation,
- *                  in nsISupports aData, in nsIException aInner); */
 NS_IMETHODIMP
 Exception::Initialize(const nsACString& aMessage, nsresult aResult,
                       const nsACString& aName, nsIStackFrame *aLocation,
-                      nsISupports *aData, nsIException *aInner)
+                      nsISupports *aData)
 {
   NS_ENSURE_FALSE(mInitialized, NS_ERROR_ALREADY_INITIALIZED);
 
@@ -470,16 +463,15 @@ Exception::Initialize(const nsACString& aMessage, nsresult aResult,
   }
 
   mData = aData;
-  mInner = aInner;
 
   mInitialized = true;
   return NS_OK;
 }
 
 JSObject*
-Exception::WrapObject(JSContext* cx)
+Exception::WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return ExceptionBinding::Wrap(cx, this);
+  return ExceptionBinding::Wrap(cx, this, aGivenProto);
 }
 
 void
@@ -540,17 +532,18 @@ Exception::GetLocation() const
 }
 
 already_AddRefed<nsISupports>
-Exception::GetInner() const
-{
-  nsCOMPtr<nsIException> inner = mInner;
-  return inner.forget();
-}
-
-already_AddRefed<nsISupports>
 Exception::GetData() const
 {
   nsCOMPtr<nsISupports> data = mData;
   return data.forget();
+}
+
+void
+Exception::GetStack(nsAString& aStack, ErrorResult& aRv) const
+{
+  if (mLocation) {
+    aRv = mLocation->GetFormattedStack(aStack);
+  }
 }
 
 void
@@ -578,7 +571,6 @@ DOMException::DOMException(nsresult aRv, const nsACString& aMessage,
     mMessage(aMessage),
     mCode(aCode)
 {
-  SetIsDOMBinding();
 }
 
 NS_IMETHODIMP
@@ -612,25 +604,6 @@ DOMException::ToString(nsACString& aReturn)
 
   nsAutoCString location;
 
-  if (mInner) {
-    nsString filename;
-    mInner->GetFilename(filename);
-
-    if (!filename.IsEmpty()) {
-      uint32_t line_nr = 0;
-
-      mInner->GetLineNumber(&line_nr);
-
-      char *temp = PR_smprintf("%s Line: %d",
-                               NS_ConvertUTF16toUTF8(filename).get(),
-                               line_nr);
-      if (temp) {
-        location.Assign(temp);
-        PR_smprintf_free(temp);
-      }
-    }
-  }
-
   if (location.IsEmpty()) {
     location = defaultLocation;
   }
@@ -656,10 +629,39 @@ DOMException::GetMessageMoz(nsString& retval)
   CopyUTF8toUTF16(mMessage, retval);
 }
 
-JSObject*
-DOMException::WrapObject(JSContext* aCx)
+already_AddRefed<DOMException>
+DOMException::Constructor(GlobalObject& /* unused */,
+                          const nsAString& aMessage,
+                          const Optional<nsAString>& aName,
+                          ErrorResult& aError)
 {
-  return DOMExceptionBinding::Wrap(aCx, this);
+  nsresult exceptionResult = NS_OK;
+  uint16_t exceptionCode = 0;
+  nsCString name(NS_LITERAL_CSTRING("Error"));
+
+  if (aName.WasPassed()) {
+    CopyUTF16toUTF8(aName.Value(), name);
+    for (uint32_t idx = 0; idx < ArrayLength(sDOMErrorMsgMap); idx++) {
+      if (name.EqualsASCII(sDOMErrorMsgMap[idx].mName)) {
+        exceptionResult = sDOMErrorMsgMap[idx].mNSResult;
+        exceptionCode = sDOMErrorMsgMap[idx].mCode;
+        break;
+      }
+    }
+  }
+
+  RefPtr<DOMException> retval =
+    new DOMException(exceptionResult,
+                     NS_ConvertUTF16toUTF8(aMessage),
+                     name,
+                     exceptionCode);
+  return retval.forget();
+}
+
+JSObject*
+DOMException::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
+{
+  return DOMExceptionBinding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */already_AddRefed<DOMException>
@@ -669,8 +671,20 @@ DOMException::Create(nsresult aRv)
   nsCString message;
   uint16_t code;
   NSResultToNameAndMessage(aRv, name, message, &code);
-  nsRefPtr<DOMException> inst =
+  RefPtr<DOMException> inst =
     new DOMException(aRv, message, name, code);
+  return inst.forget();
+}
+
+/* static */already_AddRefed<DOMException>
+DOMException::Create(nsresult aRv, const nsACString& aMessage)
+{
+  nsCString name;
+  nsCString message;
+  uint16_t code;
+  NSResultToNameAndMessage(aRv, name, message, &code);
+  RefPtr<DOMException> inst =
+    new DOMException(aRv, aMessage, name, code);
   return inst.forget();
 }
 

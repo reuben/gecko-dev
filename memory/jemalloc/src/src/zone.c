@@ -121,9 +121,11 @@ zone_memalign(malloc_zone_t *zone, size_t alignment, size_t size)
 static void
 zone_free_definite_size(malloc_zone_t *zone, void *ptr, size_t size)
 {
+	size_t alloc_size;
 
-	if (ivsalloc(ptr, config_prof) != 0) {
-		assert(ivsalloc(ptr, config_prof) == size);
+	alloc_size = ivsalloc(ptr, config_prof);
+	if (alloc_size != 0) {
+		assert(alloc_size == size);
 		je_free(ptr);
 		return;
 	}
@@ -258,13 +260,13 @@ register_zone(void)
 		/*
 		 * On OSX 10.6, having the default purgeable zone appear before
 		 * the default zone makes some things crash because it thinks it
-		 * owns the default zone allocated pointers. We thus unregister/
-		 * re-register it in order to ensure it's always after the
-		 * default zone. On OSX < 10.6, there is no purgeable zone, so
-		 * this does nothing. On OSX >= 10.6, unregistering replaces the
-		 * purgeable zone with the last registered zone above, i.e the
-		 * default zone. Registering it again then puts it at the end,
-		 * obviously after the default zone.
+		 * owns the default zone allocated pointers.  We thus
+		 * unregister/re-register it in order to ensure it's always
+		 * after the default zone.  On OSX < 10.6, there is no purgeable
+		 * zone, so this does nothing.  On OSX >= 10.6, unregistering
+		 * replaces the purgeable zone with the last registered zone
+		 * above, i.e. the default zone.  Registering it again then puts
+		 * it at the end, obviously after the default zone.
 		 */
 		if (purgeable_zone) {
 			malloc_zone_unregister(purgeable_zone);

@@ -160,7 +160,7 @@ LoginStore.prototype = {
    */
   load: function ()
   {
-    return Task.spawn(function () {
+    return Task.spawn(function* () {
       try {
         let bytes = yield OS.File.read(this.path);
 
@@ -187,6 +187,14 @@ LoginStore.prototype = {
           } catch (e2) {
             Cu.reportError(e2);
           }
+        }
+
+        // In some rare cases it's possible for logins to have been added to
+        // our database between the call to OS.File.read and when we've been
+        // notified that there was a problem with it. In that case, leave the
+        // synchronously-added data alone. See bug 1029128, comment 4.
+        if (this.dataReady) {
+          return;
         }
 
         // In any case, initialize a new object to host the data.
@@ -273,7 +281,10 @@ LoginStore.prototype = {
   /**
    * Called when the data changed, this triggers asynchronous serialization.
    */
-  saveSoon: function () this._saver.arm(),
+  saveSoon: function ()
+  {
+    return this._saver.arm();
+  },
 
   /**
    * DeferredTask that handles the save operation.
@@ -291,7 +302,7 @@ LoginStore.prototype = {
    */
   save: function ()
   {
-    return Task.spawn(function () {
+    return Task.spawn(function* () {
       // Create or overwrite the file.
       let bytes = gTextEncoder.encode(JSON.stringify(this.data));
       yield OS.File.writeAtomic(this.path, bytes,

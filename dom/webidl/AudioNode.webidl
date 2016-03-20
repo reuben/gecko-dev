@@ -24,7 +24,7 @@ enum ChannelInterpretation {
 interface AudioNode : EventTarget {
 
     [Throws]
-    void connect(AudioNode destination, optional unsigned long output = 0, optional unsigned long input = 0);
+    AudioNode connect(AudioNode destination, optional unsigned long output = 0, optional unsigned long input = 0);
     [Throws]
     void connect(AudioParam destination, optional unsigned long output = 0);
     [Throws]
@@ -47,5 +47,10 @@ interface AudioNode : EventTarget {
 partial interface AudioNode {
   [ChromeOnly]
   readonly attribute unsigned long id;
+};
+[NoInterfaceObject]
+interface AudioNodePassThrough {
+  [ChromeOnly]
+  attribute boolean passThrough;
 };
 

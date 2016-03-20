@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -39,7 +40,7 @@
 #error "nsTextFormatter is not available in the standalone glue due to NSPR dependencies."
 #endif
 
-class NS_COM_GLUE nsTextFormatter
+class nsTextFormatter
 {
 public:
 
@@ -52,7 +53,7 @@ public:
                            const char16_t* aFmt, ...);
 
   /*
-   * sprintf into a nsMemory::Alloc'd buffer. Return a pointer to
+   * sprintf into a moz_xmalloc'd buffer. Return a pointer to
    * buffer on success, nullptr on failure.
    */
   static char16_t* smprintf(const char16_t* aFmt, ...);
@@ -70,7 +71,7 @@ public:
   /*
    * Free the memory allocated, for the caller, by smprintf.
    * -- Deprecated --
-   * Callers can substitute calling smprintf_free with nsMemory::Free
+   * Callers can substitute calling smprintf_free with free
    */
   static void smprintf_free(char16_t* aMem);
 

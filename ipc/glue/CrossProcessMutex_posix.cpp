@@ -8,6 +8,10 @@
 #include "nsDebug.h"
 #include "nsISupportsImpl.h"
 
+#ifdef OS_MACOSX
+#include "nsCocoaFeatures.h"
+#endif
+
 namespace {
 
 struct MutexData {
@@ -15,7 +19,7 @@ struct MutexData {
   mozilla::Atomic<int32_t> mCount;
 };
 
-}
+} // namespace
 
 namespace mozilla {
 
@@ -38,10 +42,18 @@ InitMutex(pthread_mutex_t* mMutex)
 }
 
 CrossProcessMutex::CrossProcessMutex(const char*)
-    : mSharedBuffer(nullptr)
-    , mMutex(nullptr)
+    : mMutex(nullptr)
     , mCount(nullptr)
 {
+#ifdef OS_MACOSX
+  if (!nsCocoaFeatures::OnLionOrLater()) {
+    // Don't allow using the cross-process mutex before OS X 10.7 because it
+    // probably doesn't work very well. See discussion in bug 1072093 for more
+    // details.
+    MOZ_CRASH();
+  }
+#endif
+
   mSharedBuffer = new ipc::SharedMemoryBasic;
   if (!mSharedBuffer->Create(sizeof(MutexData))) {
     MOZ_CRASH();
@@ -67,15 +79,18 @@ CrossProcessMutex::CrossProcessMutex(const char*)
 }
 
 CrossProcessMutex::CrossProcessMutex(CrossProcessMutexHandle aHandle)
-    : mSharedBuffer(nullptr)
-    , mMutex(nullptr)
+    : mMutex(nullptr)
     , mCount(nullptr)
 {
-  if (!ipc::SharedMemoryBasic::IsHandleValid(aHandle)) {
+  mSharedBuffer = new ipc::SharedMemoryBasic;
+
+  if (!mSharedBuffer->IsHandleValid(aHandle)) {
     MOZ_CRASH();
   }
 
-  mSharedBuffer = new ipc::SharedMemoryBasic(aHandle);
+  if (!mSharedBuffer->SetHandle(aHandle)) {
+    MOZ_CRASH();
+  }
 
   if (!mSharedBuffer->Map(sizeof(MutexData))) {
     MOZ_CRASH();
@@ -106,10 +121,9 @@ CrossProcessMutex::~CrossProcessMutex()
 
   if (count == 0) {
     // Nothing can be done if the destroy fails so ignore return code.
-    unused << pthread_mutex_destroy(mMutex);
+    Unused << pthread_mutex_destroy(mMutex);
   }
 
-  delete mSharedBuffer;
   MOZ_COUNT_DTOR(CrossProcessMutex);
 }
 
@@ -128,15 +142,15 @@ CrossProcessMutex::Unlock()
 }
 
 CrossProcessMutexHandle
-CrossProcessMutex::ShareToProcess(base::ProcessHandle aHandle)
+CrossProcessMutex::ShareToProcess(base::ProcessId aTargetPid)
 {
   CrossProcessMutexHandle result = ipc::SharedMemoryBasic::NULLHandle();
 
-  if (mSharedBuffer && !mSharedBuffer->ShareToProcess(aHandle, &result)) {
+  if (mSharedBuffer && !mSharedBuffer->ShareToProcess(aTargetPid, &result)) {
     MOZ_CRASH();
   }
 
   return result;
 }
 
-}
+} // namespace mozilla

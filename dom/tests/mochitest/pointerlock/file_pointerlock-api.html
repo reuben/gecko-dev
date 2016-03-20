@@ -34,6 +34,7 @@
         pointerLockElement = false,
         hasMovementX = false,
         hasMovementY = false;
+        gotContextMenuEvent = false;
 
       function runTests () {
         ok(hasRequestPointerLock, "Element should have mozRequestPointerLock.");
@@ -44,9 +45,11 @@
         ok(pointerLockElement, "Document should keep track of correct pointer locked element");
         ok(hasMovementX, "Mouse Event should have mozMovementX.");
         ok(hasMovementY, "Mouse Event should have mozMovementY.");
+        ok(!gotContextMenuEvent, "Shouldn't have got a contextmenu event.");
       }
 
       function mouseMoveHandler(e) {
+        info("Got mousemove");
         document.removeEventListener("mousemove", mouseMoveHandler, false);
 
         hasMovementX = "mozMovementX" in e;
@@ -60,21 +63,33 @@
         pointerLockChangeEventFired = true;
 
         if (document.mozPointerLockElement) {
+          info("Got mozpointerlockchange for entering");
           pointerLocked = true;
           pointerLockElement = document.mozPointerLockElement === div;
+ 
+          window.addEventListener("contextmenu",
+                                  function() { gotContextMenuEvent = true; },
+                                  true);
+          synthesizeMouse(document.body, 4, 4,
+                          { type: "contextmenu", button: 2 },
+                          window);
+
           document.addEventListener("mousemove", mouseMoveHandler, false);
           synthesizeMouseAtCenter(div, {type: "mousemove"}, window);
         } else {
+          info("Got mozpointerlockchange for exiting");
           pointerUnlocked = true;
-          document.mozCancelFullScreen();
+          document.exitFullscreen();
         }
       }, false);
 
-      document.addEventListener("mozfullscreenchange", function(e) {
-        if (document.mozFullScreenElement === div) {
+      document.addEventListener("fullscreenchange", function(e) {
+        if (document.fullscreenElement === div) {
+          info("Got fullscreenchange for entering");
           hasRequestPointerLock = "mozRequestPointerLock" in div;
           div.mozRequestPointerLock();
         } else {
+          info("Got fullscreenchange for exiting");
           runTests();
           SimpleTest.finish();
         }
@@ -82,7 +97,8 @@
 
       function start() {
         div = document.getElementById("div");
-        div.mozRequestFullScreen();
+        info("Requesting fullscreen on parent");
+        div.requestFullscreen();
       }
     </script>
   </pre>

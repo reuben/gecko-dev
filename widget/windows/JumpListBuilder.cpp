@@ -18,7 +18,6 @@
 #include "nsISimpleEnumerator.h"
 #include "mozilla/Preferences.h"
 #include "nsStringStream.h"
-#include "nsNetUtil.h"
 #include "nsThreadUtils.h"
 #include "mozilla/LazyIdleThread.h"
 #include "nsIObserverService.h"
@@ -43,6 +42,7 @@ const char kPrefTaskbarEnabled[] = "browser.taskbar.lists.enabled";
 
 NS_IMPL_ISUPPORTS(JumpListBuilder, nsIJumpListBuilder, nsIObserver)
 #define TOPIC_PROFILE_BEFORE_CHANGE "profile-before-change"
+#define TOPIC_CLEAR_PRIVATE_DATA "clear-private-data"
 
 JumpListBuilder::JumpListBuilder() :
   mMaxItems(0),
@@ -63,6 +63,7 @@ JumpListBuilder::JumpListBuilder() :
     do_GetService("@mozilla.org/observer-service;1");
   if (observerService) {
     observerService->AddObserver(this, TOPIC_PROFILE_BEFORE_CHANGE, false);
+    observerService->AddObserver(this, TOPIC_CLEAR_PRIVATE_DATA, false);
   }
 }
 
@@ -73,7 +74,6 @@ JumpListBuilder::~JumpListBuilder()
   ::CoUninitialize();
 }
 
-/* readonly attribute short available; */
 NS_IMETHODIMP JumpListBuilder::GetAvailable(int16_t *aAvailable)
 {
   *aAvailable = false;
@@ -84,7 +84,6 @@ NS_IMETHODIMP JumpListBuilder::GetAvailable(int16_t *aAvailable)
   return NS_OK;
 }
 
-/* readonly attribute boolean isListCommitted; */
 NS_IMETHODIMP JumpListBuilder::GetIsListCommitted(bool *aCommit)
 {
   *aCommit = mHasCommit;
@@ -92,7 +91,6 @@ NS_IMETHODIMP JumpListBuilder::GetIsListCommitted(bool *aCommit)
   return NS_OK;
 }
 
-/* readonly attribute short maxItems; */
 NS_IMETHODIMP JumpListBuilder::GetMaxListItems(int16_t *aMaxItems)
 {
   if (!mJumpListMgr)
@@ -118,7 +116,6 @@ NS_IMETHODIMP JumpListBuilder::GetMaxListItems(int16_t *aMaxItems)
   return NS_OK;
 }
 
-/* boolean initListBuild(in nsIMutableArray removedItems); */
 NS_IMETHODIMP JumpListBuilder::InitListBuild(nsIMutableArray *removedItems, bool *_retval)
 {
   NS_ENSURE_ARG_POINTER(removedItems);
@@ -235,7 +232,6 @@ nsresult JumpListBuilder::RemoveIconCacheForAllItems()
     if (NS_FAILED(currFile->GetPath(path)))
       continue;
 
-    int32_t len = path.Length();
     if (StringTail(path, 4).LowerCaseEqualsASCII(".ico")) {
       // Check if the cached ICO file exists
       bool exists;
@@ -250,7 +246,6 @@ nsresult JumpListBuilder::RemoveIconCacheForAllItems()
   return NS_OK;
 }
 
-/* boolean addListToBuild(in short aCatType, [optional] in nsIArray items, [optional] in AString catName); */
 NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items, const nsAString &catName, bool *_retval)
 {
   nsresult rv;
@@ -266,7 +261,7 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
       NS_ENSURE_ARG_POINTER(items);
 
       HRESULT hr;
-      nsRefPtr<IObjectCollection> collection;
+      RefPtr<IObjectCollection> collection;
       hr = CoCreateInstance(CLSID_EnumerableObjectCollection, nullptr,
                             CLSCTX_INPROC_SERVER, IID_IObjectCollection,
                             getter_AddRefs(collection));
@@ -282,7 +277,7 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
           continue;
         // Check for separators 
         if (IsSeparator(item)) {
-          nsRefPtr<IShellLinkW> link;
+          RefPtr<IShellLinkW> link;
           rv = JumpListSeparator::GetSeparator(link);
           if (NS_FAILED(rv))
             return rv;
@@ -290,7 +285,7 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
           continue;
         }
         // These should all be ShellLinks
-        nsRefPtr<IShellLinkW> link;
+        RefPtr<IShellLinkW> link;
         rv = JumpListShortcut::GetShellLink(item, link, mIOThread);
         if (NS_FAILED(rv))
           return rv;
@@ -298,7 +293,7 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
       }
 
       // We need IObjectArray to submit
-      nsRefPtr<IObjectArray> pArray;
+      RefPtr<IObjectArray> pArray;
       hr = collection->QueryInterface(IID_IObjectArray, getter_AddRefs(pArray));
       if (FAILED(hr))
         return NS_ERROR_UNEXPECTED;
@@ -332,7 +327,7 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
         return NS_ERROR_INVALID_ARG;
 
       HRESULT hr;
-      nsRefPtr<IObjectCollection> collection;
+      RefPtr<IObjectCollection> collection;
       hr = CoCreateInstance(CLSID_EnumerableObjectCollection, nullptr,
                             CLSCTX_INPROC_SERVER, IID_IObjectCollection,
                             getter_AddRefs(collection));
@@ -351,7 +346,7 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
         switch(type) {
           case nsIJumpListItem::JUMPLIST_ITEM_SEPARATOR:
           {
-            nsRefPtr<IShellLinkW> shellItem;
+            RefPtr<IShellLinkW> shellItem;
             rv = JumpListSeparator::GetSeparator(shellItem);
             if (NS_FAILED(rv))
               return rv;
@@ -360,7 +355,7 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
           break;
           case nsIJumpListItem::JUMPLIST_ITEM_LINK:
           {
-            nsRefPtr<IShellItem2> shellItem;
+            RefPtr<IShellItem2> shellItem;
             rv = JumpListLink::GetShellItem(item, shellItem);
             if (NS_FAILED(rv))
               return rv;
@@ -369,7 +364,7 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
           break;
           case nsIJumpListItem::JUMPLIST_ITEM_SHORTCUT:
           {
-            nsRefPtr<IShellLinkW> shellItem;
+            RefPtr<IShellLinkW> shellItem;
             rv = JumpListShortcut::GetShellLink(item, shellItem, mIOThread);
             if (NS_FAILED(rv))
               return rv;
@@ -380,7 +375,7 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
       }
 
       // We need IObjectArray to submit
-      nsRefPtr<IObjectArray> pArray;
+      RefPtr<IObjectArray> pArray;
       hr = collection->QueryInterface(IID_IObjectArray, (LPVOID*)&pArray);
       if (FAILED(hr))
         return NS_ERROR_UNEXPECTED;
@@ -402,7 +397,6 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
   return NS_OK;
 }
 
-/* void abortListBuild(); */
 NS_IMETHODIMP JumpListBuilder::AbortListBuild()
 {
   if (!mJumpListMgr)
@@ -414,7 +408,6 @@ NS_IMETHODIMP JumpListBuilder::AbortListBuild()
   return NS_OK;
 }
 
-/* boolean commitListBuild(); */
 NS_IMETHODIMP JumpListBuilder::CommitListBuild(bool *_retval)
 {
   *_retval = false;
@@ -434,7 +427,6 @@ NS_IMETHODIMP JumpListBuilder::CommitListBuild(bool *_retval)
   return NS_OK;
 }
 
-/* boolean deleteActiveList(); */
 NS_IMETHODIMP JumpListBuilder::DeleteActiveList(bool *_retval)
 {
   *_retval = false;
@@ -537,6 +529,11 @@ NS_IMETHODIMP JumpListBuilder::Observe(nsISupports* aSubject,
         new mozilla::widget::AsyncDeleteAllFaviconsFromDisk();
       mIOThread->Dispatch(event, NS_DISPATCH_NORMAL);
     }
+  } else if (strcmp(aTopic, TOPIC_CLEAR_PRIVATE_DATA) == 0) {
+    // Delete JumpListCache icons from Disk, if any.
+    nsCOMPtr<nsIRunnable> event =
+      new mozilla::widget::AsyncDeleteAllFaviconsFromDisk(false);
+    mIOThread->Dispatch(event, NS_DISPATCH_NORMAL);
   }
   return NS_OK;
 }

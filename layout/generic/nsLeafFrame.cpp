@@ -8,38 +8,44 @@
 #include "nsLeafFrame.h"
 #include "nsPresContext.h"
 
+using namespace mozilla;
+
 nsLeafFrame::~nsLeafFrame()
 {
 }
 
-NS_IMPL_FRAMEARENA_HELPERS(nsLeafFrame)
-
 /* virtual */ nscoord
-nsLeafFrame::GetMinWidth(nsRenderingContext *aRenderingContext)
+nsLeafFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 {
   nscoord result;
   DISPLAY_MIN_WIDTH(this, result);
-
-  result = GetIntrinsicWidth();
+  result = GetIntrinsicISize();
   return result;
 }
 
 /* virtual */ nscoord
-nsLeafFrame::GetPrefWidth(nsRenderingContext *aRenderingContext)
+nsLeafFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
 {
   nscoord result;
   DISPLAY_PREF_WIDTH(this, result);
-  result = GetIntrinsicWidth();
+  result = GetIntrinsicISize();
   return result;
 }
 
-/* virtual */ nsSize
+/* virtual */
+LogicalSize
 nsLeafFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
-                             nsSize aCBSize, nscoord aAvailableWidth,
-                             nsSize aMargin, nsSize aBorder,
-                             nsSize aPadding, bool aShrinkWrap)
+                             WritingMode aWM,
+                             const LogicalSize& aCBSize,
+                             nscoord aAvailableISize,
+                             const LogicalSize& aMargin,
+                             const LogicalSize& aBorder,
+                             const LogicalSize& aPadding,
+                             bool aShrinkWrap)
 {
-  return nsSize(GetIntrinsicWidth(), GetIntrinsicHeight());
+  const WritingMode wm = GetWritingMode();
+  LogicalSize result(wm, GetIntrinsicISize(), GetIntrinsicBSize());
+  return result.ConvertTo(aWM, wm);
 }
 
 void
@@ -48,6 +54,7 @@ nsLeafFrame::Reflow(nsPresContext* aPresContext,
                     const nsHTMLReflowState& aReflowState,
                     nsReflowStatus& aStatus)
 {
+  MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsLeafFrame");
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                  ("enter nsLeafFrame::Reflow: aMaxSize=%d,%d",
@@ -68,48 +75,41 @@ nsLeafFrame::DoReflow(nsPresContext* aPresContext,
 {
   NS_ASSERTION(aReflowState.ComputedWidth() != NS_UNCONSTRAINEDSIZE,
                "Shouldn't have unconstrained stuff here "
-               "Thanks to the rules of reflow");
+               "thanks to the rules of reflow");
   NS_ASSERTION(NS_INTRINSICSIZE != aReflowState.ComputedHeight(),
                "Shouldn't have unconstrained stuff here "
-               "thanks to ComputeAutoSize");  
+               "thanks to ComputeAutoSize");
 
-  aMetrics.Width() = aReflowState.ComputedWidth();
-  aMetrics.Height() = aReflowState.ComputedHeight();
-  
-  AddBordersAndPadding(aReflowState, aMetrics);
+  // XXX how should border&padding effect baseline alignment?
+  // => descent = borderPadding.bottom for example
+  WritingMode wm = aReflowState.GetWritingMode();
+  aMetrics.SetSize(wm, aReflowState.ComputedSizeWithBorderPadding());
+
   aStatus = NS_FRAME_COMPLETE;
 
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                  ("exit nsLeafFrame::DoReflow: size=%d,%d",
-                  aMetrics.Width(), aMetrics.Height()));
+                  aMetrics.ISize(wm), aMetrics.BSize(wm)));
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
 
   aMetrics.SetOverflowAreasToDesiredBounds();
 }
 
 nscoord
-nsLeafFrame::GetIntrinsicHeight()
+nsLeafFrame::GetIntrinsicBSize()
 {
   NS_NOTREACHED("Someone didn't override Reflow or ComputeAutoSize");
   return 0;
-}
-
-// XXX how should border&padding effect baseline alignment?
-// => descent = borderPadding.bottom for example
-void
-nsLeafFrame::AddBordersAndPadding(const nsHTMLReflowState& aReflowState,
-                                  nsHTMLReflowMetrics& aMetrics)
-{
-  aMetrics.Width() += aReflowState.ComputedPhysicalBorderPadding().LeftRight();
-  aMetrics.Height() += aReflowState.ComputedPhysicalBorderPadding().TopBottom();
 }
 
 void
 nsLeafFrame::SizeToAvailSize(const nsHTMLReflowState& aReflowState,
                              nsHTMLReflowMetrics& aDesiredSize)
 {
-  aDesiredSize.Width() = aReflowState.AvailableWidth(); // FRAME
-  aDesiredSize.Height() = aReflowState.AvailableHeight();
+  WritingMode wm = aReflowState.GetWritingMode();
+  LogicalSize size(wm, aReflowState.AvailableISize(), // FRAME
+                   aReflowState.AvailableBSize());
+  aDesiredSize.SetSize(wm, size);
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   FinishAndStoreOverflow(&aDesiredSize);  
 }
